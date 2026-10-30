@@ -1,15 +1,9 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import React, { useState, useRef, useEffect } from 'react';
-import { SAMPLE_DOCUMENT, CyberCrimeDocument } from './data/sampleDocument';
+import React, { useState, useRef } from 'react';
+import { CyberCrimeDocument } from './data/sampleDocument';
 import { DocumentHtmlView } from './components/DocumentHtmlView';
 import { MoneyTrailGraph } from './components/MoneyTrailGraph';
 import { OriginalPdfViewer } from './components/OriginalPdfViewer';
 import { RawDataViewer } from './components/RawDataViewer';
-import { generateStandaloneHtml } from './utils/htmlGenerator';
 import {
   Upload,
   RotateCcw,
@@ -18,26 +12,24 @@ import {
   SplitSquareVertical,
   Code2,
   Workflow,
-  Sparkles,
   CheckCircle2,
   AlertCircle,
-  FileSpreadsheet,
   Globe,
   Loader2,
-  HelpCircle,
+  Sparkles,
 } from 'lucide-react';
 
 export default function App() {
-  const [currentDoc, setCurrentDoc] = useState<CyberCrimeDocument | null>(SAMPLE_DOCUMENT);
-  const [pdfUrl, setPdfUrl] = useState<string>('/assets/aistudio/31109260232375_a8a8e1dc.pdf');
-  const [fileName, setFileName] = useState<string>('31109260232375_a8a8e1dc.pdf');
+  const [currentDoc, setCurrentDoc] = useState<CyberCrimeDocument | null>(null);
+  const [pdfUrl, setPdfUrl] = useState<string>('');
+  const [fileName, setFileName] = useState<string>('');
   const [activeTab, setActiveTab] = useState<'html' | 'split' | 'trail' | 'code'>('html');
   const [language, setLanguage] = useState<'gu' | 'en'>('gu');
   const [isProcessing, setIsProcessing] = useState(false);
   const [ocrStep, setOcrStep] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastUploadedFile, setLastUploadedFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [showVercelGuide, setShowVercelGuide] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -52,14 +44,6 @@ export default function App() {
     setActiveTab('html');
   };
 
-  const handleLoadSample = () => {
-    setCurrentDoc(SAMPLE_DOCUMENT);
-    setPdfUrl('/assets/aistudio/31109260232375_a8a8e1dc.pdf');
-    setFileName('31109260232375_a8a8e1dc.pdf');
-    setErrorMessage(null);
-    setActiveTab('html');
-  };
-
   const handleFileUpload = async (file: File) => {
     if (!file) return;
 
@@ -68,6 +52,7 @@ export default function App() {
       return;
     }
 
+    setLastUploadedFile(file);
     setFileName(file.name);
     setErrorMessage(null);
     setIsProcessing(true);
@@ -88,7 +73,7 @@ export default function App() {
 
       const base64Data = await base64Promise;
 
-      setOcrStep(isGu ? 'Gemini 3.8 Flash OCR એન્જિન ડેટા સ્કેન કરી રહ્યું છે...' : 'Gemini 3.8 Flash OCR engine extracting all pages...');
+      setOcrStep(isGu ? 'AI OCR એન્જિન ડેટા સ્કેન કરી રહ્યું છે...' : 'AI OCR engine extracting all pages...');
 
       const response = await fetch('/api/ocr-pdf', {
         method: 'POST',
@@ -109,28 +94,6 @@ export default function App() {
         result = JSON.parse(rawText);
       } catch (jsonErr) {
         console.error('Failed to parse server response as JSON:', rawText);
-        
-        // Detect Vercel 404 / 504 HTML error page
-        const isVercelHtml = 
-          rawText.toLowerCase().includes('the page could not be found') ||
-          rawText.toLowerCase().includes('the page cannot be found') ||
-          rawText.startsWith('<!DOCTYPE') ||
-          rawText.startsWith('<html') ||
-          rawText.startsWith('The page');
-
-        if (isVercelHtml || response.status === 404) {
-          // Provide instant fallback with helpful guidance
-          setCurrentDoc(SAMPLE_DOCUMENT);
-          setErrorMessage(
-            isGu
-              ? `Vercel કનેક્શન નોટિસ: Vercel સર્વરલેસ એન્ડપોઇન્ટ (404) મળ્યો નથી. અમે Vercel માટે vercel.json અને api/ocr-pdf.ts સામેલ કર્યું છે. GitHub પર પુશ કર્યા પછી Vercel Environment Variables માં GEMINI_API_KEY ઉમેરો. હાલમાં ચકાસાયેલ દસ્તાવેજ સફળતાપૂર્વક લોડ કરવામાં આવ્યો છે.`
-              : `Vercel Connection Notice: /api/ocr-pdf returned a 404 HTML page. We have created vercel.json and api/ocr-pdf.ts. When deployed to Vercel, ensure GEMINI_API_KEY is configured in Vercel Environment Variables. The verified document data has been loaded as fallback.`
-          );
-          setIsProcessing(false);
-          setOcrStep('');
-          return;
-        }
-
         throw new Error(
           isGu 
             ? `સર્વર તરફથી અમાન્ય પ્રતિસાદ મળ્યો (Status ${response.status}).` 
@@ -139,7 +102,12 @@ export default function App() {
       }
 
       if (!response.ok) {
-        throw new Error(result.error || `Server OCR processing failed with status ${response.status}`);
+        let errStr = result.error || `Server OCR processing failed with status ${response.status}`;
+        try {
+          const parsed = JSON.parse(errStr);
+          if (parsed?.error?.message) errStr = parsed.error.message;
+        } catch (_) {}
+        throw new Error(errStr);
       }
 
       setOcrStep(isGu ? 'કોષ્ટકો અને HTML/CSS લેઆઉટ તૈયાર થઈ રહ્યું છે...' : 'Reconstructing tables and building HTML/CSS layout...');
@@ -212,11 +180,31 @@ export default function App() {
       }
     } catch (err: any) {
       console.error('OCR Error:', err);
-      setErrorMessage(
-        isGu
-          ? `OCR પ્રોસેસિંગમાં ક્ષતિ: ${err.message || 'અજ્ઞાત ક્ષતિ'}. કૃપા કરીને ફરી પ્રયાસ કરો.`
-          : `OCR Error: ${err.message || 'Unknown error'}. Please try again.`
-      );
+      let rawMsg = err?.message || '';
+      try {
+        const parsed = JSON.parse(rawMsg);
+        if (parsed?.error?.message) rawMsg = parsed.error.message;
+      } catch (_) {}
+
+      const isDemandSpike = 
+        rawMsg.includes('503') || 
+        rawMsg.includes('high demand') || 
+        rawMsg.includes('UNAVAILABLE') || 
+        rawMsg.includes('temporary');
+
+      if (isDemandSpike) {
+        setErrorMessage(
+          isGu
+            ? 'Google સર્વર પર હાલમાં ખૂબ વધુ ટ્રાફિક (High Demand) હોવાથી કામચલાઉ વિલંબ છે. કૃપા કરીને થોડી સેકન્ડ પછી નીચે આપેલ "ફરી પ્રયાસ કરો" બટન દબાવો.'
+            : 'Gemini server is experiencing temporary high demand (503). Please wait a few seconds and click Retry below.'
+        );
+      } else {
+        setErrorMessage(
+          isGu
+            ? `OCR પ્રોસેસિંગમાં ક્ષતિ: ${rawMsg}. કૃપા કરીને ફરી પ્રયાસ કરો.`
+            : `OCR Error: ${rawMsg}. Please try again.`
+        );
+      }
     } finally {
       setIsProcessing(false);
       setOcrStep('');
@@ -263,16 +251,6 @@ export default function App() {
 
             {/* Quick Actions & Language Toggle */}
             <div className="flex flex-wrap items-center gap-2">
-              {/* Vercel & GitHub Help Button */}
-              <button
-                onClick={() => setShowVercelGuide(true)}
-                className="flex items-center gap-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-2.5 py-1.5 rounded-lg transition"
-                title="Vercel & GitHub Deployment Guide"
-              >
-                <HelpCircle className="w-3.5 h-3.5 text-blue-400" />
-                <span>{isGu ? 'Vercel ગાઈડ' : 'Vercel Guide'}</span>
-              </button>
-
               {/* Language Toggle */}
               <button
                 onClick={() => setLanguage(language === 'gu' ? 'en' : 'gu')}
@@ -291,16 +269,6 @@ export default function App() {
               >
                 <RotateCcw className="w-3.5 h-3.5 text-rose-400" />
                 <span>{isGu ? 'રીસેટ (Reset)' : 'Reset'}</span>
-              </button>
-
-              {/* Load Sample Button */}
-              <button
-                onClick={handleLoadSample}
-                className="flex items-center gap-1 text-xs bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-200 border border-indigo-700/60 px-3 py-1.5 rounded-lg font-semibold transition"
-                title={isGu ? 'અટેચ કરેલી સાયબર ક્રાઇમ PDF લોડ કરો' : 'Load attached sample 7-page PDF'}
-              >
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                <span>{isGu ? 'સેમ્પલ PDF લોડ કરો' : 'Load Sample PDF'}</span>
               </button>
 
               {/* Upload PDF Button */}
@@ -401,13 +369,25 @@ export default function App() {
         {errorMessage && (
           <div className="bg-rose-50 border border-rose-300 rounded-xl p-4 flex items-start gap-3 text-rose-800 text-sm animate-fade-in no-print">
             <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <strong className="block font-semibold">{isGu ? 'ક્ષતિ સંદેશ' : 'Error'}</strong>
-              <span>{errorMessage}</span>
+            <div className="flex-1 space-y-2">
+              <div>
+                <strong className="block font-semibold">{isGu ? 'ક્ષતિ સંદેશ' : 'Error Notice'}</strong>
+                <span>{errorMessage}</span>
+              </div>
+              {lastUploadedFile && (
+                <button
+                  onClick={() => handleFileUpload(lastUploadedFile)}
+                  disabled={isProcessing}
+                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold transition shadow-xs disabled:opacity-50"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>{isGu ? 'ફરી પ્રયાસ કરો (Retry Now)' : 'Retry Now'}</span>
+                </button>
+              )}
             </div>
             <button
               onClick={() => setErrorMessage(null)}
-              className="text-xs text-rose-600 hover:text-rose-900 font-bold"
+              className="text-xs text-rose-600 hover:text-rose-900 font-bold p-1"
             >
               ✕
             </button>
@@ -479,14 +459,6 @@ export default function App() {
                 <Upload className="w-4 h-4" />
                 <span>{isGu ? 'ફાઇલ પસંદ કરો' : 'Browse Files'}</span>
               </button>
-
-              <button
-                onClick={handleLoadSample}
-                className="bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-bold px-6 py-3 rounded-xl transition flex items-center gap-2 text-sm"
-              >
-                <Sparkles className="w-4 h-4 text-amber-500" />
-                <span>{isGu ? 'સેમ્પલ PDF લોડ કરો (31109260232375)' : 'Load Sample PDF (31109260232375)'}</span>
-              </button>
             </div>
 
             <div className="text-xs text-slate-400 max-w-sm mx-auto pt-4 border-t border-slate-200">
@@ -552,88 +524,6 @@ export default function App() {
           </div>
         </div>
       </footer>
-
-      {/* Vercel & GitHub Deployment Modal */}
-      {showVercelGuide && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto text-xs">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-blue-100 text-blue-700 rounded-lg">
-                  <HelpCircle className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900">
-                    {isGu ? 'GitHub અને Vercel ડિપ્લોયમેન્ટ ગાઈડ' : 'GitHub & Vercel Deployment Guide'}
-                  </h3>
-                  <p className="text-[11px] text-slate-500">
-                    {isGu ? '404 "The page could not be found" ઉકેલ' : 'Fix 404 "The page could not be found"'}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowVercelGuide(false)}
-                className="text-slate-400 hover:text-slate-700 text-base font-bold p-1"
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="space-y-3 text-slate-700">
-              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-amber-900">
-                <strong className="block font-semibold mb-1">
-                  {isGu ? 'આ ક્ષતિ શા માટે આવી હતી?' : 'Why did this error occur?'}
-                </strong>
-                <p>
-                  {isGu
-                    ? 'જ્યારે તમે GitHub પર કોડ અપલોડ કરીને Vercel સાથે કનેક્ટ કરો છો, ત્યારે Vercel ડિફોલ્ટ રૂપે Vite SPA રન કરે છે અને /api/ocr-pdf રૂટ મળતો નથી. પરિણામે Vercel HTML માં 404 પેજ ("The page could not be found") રિટર્ન કરે છે જે JSON નથી હોતું.'
-                    : 'When you deploy to Vercel, by default it only serves static Vite files. When the app calls /api/ocr-pdf, Vercel returns an HTML 404 error page starting with "The page could not be found", which causes the JSON parse error.'}
-                </p>
-              </div>
-
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-emerald-950 space-y-2">
-                <strong className="block font-semibold text-emerald-900">
-                  {isGu ? 'અમે પ્રોજેક્ટમાં શું સુધારી દીધું છે:' : 'What we have already added to fix it:'}
-                </strong>
-                <ul className="list-disc pl-4 space-y-1 text-[11.5px]">
-                  <li>
-                    <code>vercel.json</code>: Vercel ને <code>/api/*</code> રૂટ્સ હેન્ડલ કરવા માટે કોન્ફિગર કરવામાં આવ્યું છે.
-                  </li>
-                  <li>
-                    <code>/api/ocr-pdf.ts</code>: Vercel Serverless Function ફાઇલ બનાવી છે જેથી Vercel પર API સીધું ચાલે.
-                  </li>
-                  <li>
-                    <strong>રેઝિલિઅન્ટ એરર હેન્ડલિંગ</strong>: જો Vercel પર સર્વરલેસ એક્ટિવ ન હોય તો પણ એપ ક્રેશ થયા વગર ચકાસાયેલ દસ્તાવેજ લોડ કરશે.
-                  </li>
-                </ul>
-              </div>
-
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
-                <strong className="block font-semibold text-slate-900">
-                  {isGu ? 'Vercel પર કરવાના ૨ સરળ પગલાં:' : '2 Simple Steps on Vercel Dashboard:'}
-                </strong>
-                <ol className="list-decimal pl-4 space-y-1.5 text-[11.5px]">
-                  <li>
-                    GitHub પર નવી ફાઇલો પુશ કરો (<code>vercel.json</code> અને <code>api/ocr-pdf.ts</code>).
-                  </li>
-                  <li>
-                    Vercel પ્રોજેક્ટમાં <strong>Settings &gt; Environment Variables</strong> માં જાઓ અને <code>GEMINI_API_KEY</code> ઉમેરો.
-                  </li>
-                </ol>
-              </div>
-            </div>
-
-            <div className="pt-2 flex justify-end">
-              <button
-                onClick={() => setShowVercelGuide(false)}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-bold px-4 py-2 rounded-xl text-xs transition"
-              >
-                {isGu ? 'સમજાઈ ગયું' : 'Got it'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

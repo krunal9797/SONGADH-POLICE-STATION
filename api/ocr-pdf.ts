@@ -1,5 +1,4 @@
 import { GoogleGenAI } from '@google/genai';
-import { SAMPLE_DOCUMENT } from '../src/data/sampleDocument';
 
 export const config = {
   maxDuration: 60,
@@ -18,6 +17,38 @@ const ai = new GoogleGenAI({
     },
   },
 });
+
+// Candidate models for OCR in case of 503 spikes on a single model
+const CANDIDATE_MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+
+async function callGeminiWithFallback(contents: any, config: any) {
+  let lastError: any = null;
+
+  for (const model of CANDIDATE_MODELS) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        const response = await ai.models.generateContent({
+          model,
+          contents,
+          config,
+        });
+        if (response && response.text) {
+          return response;
+        }
+      } catch (err: any) {
+        lastError = err;
+        const errMsg = err?.message || String(err);
+        if (errMsg.includes('503') || errMsg.includes('429') || errMsg.includes('demand') || errMsg.includes('UNAVAILABLE')) {
+          await new Promise((r) => setTimeout(r, 1200 * attempt));
+        } else {
+          break;
+        }
+      }
+    }
+  }
+
+  throw lastError;
+}
 
 export default async function handler(req: any, res: any) {
   // Set CORS headers for Vercel
@@ -39,27 +70,15 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    let { pdfBase64, isSample, filename } = req.body || {};
-
-    // Fast path: if requesting the sample PDF or the uploaded file is the sample file
-    if (isSample || filename?.includes('31109260232375')) {
-      return res.status(200).json({
-        success: true,
-        data: SAMPLE_DOCUMENT,
-        cached: true,
-      });
-    }
+    const { pdfBase64 } = req.body || {};
 
     if (!pdfBase64) {
       return res.status(400).json({ error: 'No PDF provided.' });
     }
 
     if (!process.env.GEMINI_API_KEY) {
-      // If Vercel deployment doesn't have GEMINI_API_KEY configured yet, provide helpful message and sample data
-      return res.status(200).json({
-        success: true,
-        data: SAMPLE_DOCUMENT,
-        warning: 'GEMINI_API_KEY not configured on Vercel environment variables. Loaded verified document schema.',
+      return res.status(500).json({
+        error: 'GEMINI_API_KEY is not configured in environment variables.',
       });
     }
 
@@ -218,9 +237,8 @@ Return ONLY a JSON object with this exact structure:
   "rawTextSummary": string
 }`;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: [
+    const response = await callGeminiWithFallback(
+      [
         {
           inlineData: {
             mimeType: 'application/pdf',
@@ -231,11 +249,11 @@ Return ONLY a JSON object with this exact structure:
           text: 'Perform complete, thorough extraction of all pages, text, and tables from this PDF document into the requested JSON schema. Do not skip or truncate any transaction records.',
         },
       ],
-      config: {
+      {
         systemInstruction: systemPrompt,
         responseMimeType: 'application/json',
-      },
-    });
+      }
+    );
 
     const jsonText = response.text || '{}';
     let parsedData = {};
@@ -252,6 +270,13 @@ Return ONLY a JSON object with this exact structure:
     });
   } catch (error: any) {
     console.error('OCR Error on Vercel:', error);
-    return res.status(500).json({ error: error.message || 'Error processing PDF OCR' });
+    let msg = error?.message || 'Error processing PDF OCR';
+    try {
+      const parsed = JSON.parse(msg);
+      if (parsed?.error?.message) {
+        msg = parsed.error.message;
+      }
+    } catch (_) {}
+    return res.status(500).json({ error: msg });
   }
 }

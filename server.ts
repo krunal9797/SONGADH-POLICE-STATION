@@ -24,68 +24,47 @@ const ai = new GoogleGenAI({
   },
 });
 
-const SAMPLE_PDF_PATH = path.resolve(process.cwd(), 'public/assets/aistudio/31109260232375_a8a8e1dc.pdf');
+// Candidate models for OCR in case of 503 spikes on a single model
+const CANDIDATE_MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
 
-// Sample document verified extraction for instant, reliable loading
-import { SAMPLE_DOCUMENT } from './src/data/sampleDocument';
-
-// API Endpoint to get sample PDF info
-app.get('/api/sample-pdf', (req: Request, res: Response) => {
-  try {
-    if (fs.existsSync(SAMPLE_PDF_PATH)) {
-      const stats = fs.statSync(SAMPLE_PDF_PATH);
-      res.json({
-        exists: true,
-        filename: '31109260232375_a8a8e1dc.pdf',
-        size: stats.size,
-        url: '/assets/aistudio/31109260232375_a8a8e1dc.pdf',
-      });
-    } else {
-      res.status(404).json({ error: 'Sample PDF not found' });
-    }
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Helper for calling Gemini with retry on 503 / 429
-async function callGeminiWithRetry(contents: any, config: any, maxRetries = 3) {
-  let attempt = 0;
+async function callGeminiWithFallback(contents: any, config: any) {
   let lastError: any = null;
 
-  while (attempt < maxRetries) {
-    try {
-      return await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents,
-        config,
-      });
-    } catch (err: any) {
-      lastError = err;
-      attempt++;
-      console.warn(`Gemini API call attempt ${attempt} failed with:`, err.message || err);
-      if (attempt < maxRetries) {
-        const delay = Math.pow(2, attempt) * 1000;
-        await new Promise((r) => setTimeout(r, delay));
+  for (const model of CANDIDATE_MODELS) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        console.log(`Calling Gemini model: ${model} (attempt ${attempt})...`);
+        const response = await ai.models.generateContent({
+          model,
+          contents,
+          config,
+        });
+        if (response && response.text) {
+          return response;
+        }
+      } catch (err: any) {
+        lastError = err;
+        const errMsg = err?.message || String(err);
+        console.warn(`Model ${model} attempt ${attempt} failed:`, errMsg);
+
+        // If it is 503 (high demand) or 429 (rate limit), pause briefly
+        if (errMsg.includes('503') || errMsg.includes('429') || errMsg.includes('demand') || errMsg.includes('UNAVAILABLE')) {
+          await new Promise((r) => setTimeout(r, 1200 * attempt));
+        } else {
+          // If fatal error like invalid input, break out of this model
+          break;
+        }
       }
     }
   }
+
   throw lastError;
 }
 
 // API endpoint to process any uploaded PDF using Gemini 3.8 Flash OCR & Extraction
 app.post('/api/ocr-pdf', async (req: Request, res: Response) => {
   try {
-    let { pdfBase64, isSample, filename } = req.body;
-
-    // Fast path: if requesting the sample PDF or the uploaded file is the sample file
-    if (isSample || filename?.includes('31109260232375')) {
-      return res.json({
-        success: true,
-        data: SAMPLE_DOCUMENT,
-        cached: true,
-      });
-    }
+    const { pdfBase64 } = req.body;
 
     if (!pdfBase64) {
       return res.status(400).json({ error: 'No PDF provided.' });
@@ -246,7 +225,7 @@ Return ONLY a JSON object with this exact structure:
   "rawTextSummary": string
 }`;
 
-    const response = await callGeminiWithRetry(
+    const response = await callGeminiWithFallback(
       [
         {
           inlineData: {
@@ -279,7 +258,15 @@ Return ONLY a JSON object with this exact structure:
     });
   } catch (error: any) {
     console.error('OCR Error:', error);
-    res.status(500).json({ error: error.message || 'Error processing PDF OCR' });
+    let msg = error?.message || 'Error processing PDF OCR';
+    try {
+      const parsed = JSON.parse(msg);
+      if (parsed?.error?.message) {
+        msg = parsed.error.message;
+      }
+    } catch (_) {}
+
+    res.status(500).json({ error: msg });
   }
 });
 

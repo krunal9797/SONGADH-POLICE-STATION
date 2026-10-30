@@ -5,6 +5,7 @@ import { MoneyTrailGraph } from './components/MoneyTrailGraph';
 import { OriginalPdfViewer } from './components/OriginalPdfViewer';
 import { RawDataViewer } from './components/RawDataViewer';
 import { KycLetterGenerator } from './components/KycLetterGenerator';
+import { BankVerificationLetterGenerator } from './components/BankVerificationLetterGenerator';
 import {
   Upload,
   RotateCcw,
@@ -19,13 +20,14 @@ import {
   Loader2,
   Sparkles,
   FileCheck2,
+  Building2,
 } from 'lucide-react';
 
 export default function App() {
   const [currentDoc, setCurrentDoc] = useState<CyberCrimeDocument | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'html' | 'split' | 'trail' | 'code' | 'kyc'>('html');
+  const [activeTab, setActiveTab] = useState<'html' | 'split' | 'trail' | 'code' | 'kyc' | 'bank'>('html');
   const [language, setLanguage] = useState<'gu' | 'en'>('gu');
   const [isProcessing, setIsProcessing] = useState(false);
   const [ocrStep, setOcrStep] = useState<string>('');
@@ -372,6 +374,18 @@ export default function App() {
                 <FileCheck2 className="w-4 h-4 text-amber-400" />
                 <span>{isGu ? '૫. KYC લેટર (BNSS 94)' : '5. KYC Notice (BNSS 94)'}</span>
               </button>
+
+              <button
+                onClick={() => setActiveTab('bank')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition whitespace-nowrap ${
+                  activeTab === 'bank'
+                    ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                    : 'text-emerald-400 hover:text-emerald-300 hover:bg-slate-800/60 font-semibold'
+                }`}
+              >
+                <Building2 className="w-4 h-4 text-emerald-400" />
+                <span>{isGu ? '૬. બેંક વેરિફિકેશન લેટર' : '6. Bank Verification'}</span>
+              </button>
             </div>
           </div>
         )}
@@ -490,6 +504,7 @@ export default function App() {
                 document={currentDoc}
                 language={language}
                 onGenerateKycLetter={() => setActiveTab('kyc')}
+                onGenerateBankLetter={() => setActiveTab('bank')}
               />
             )}
 
@@ -514,6 +529,7 @@ export default function App() {
                       document={currentDoc}
                       language={language}
                       onGenerateKycLetter={() => setActiveTab('kyc')}
+                      onGenerateBankLetter={() => setActiveTab('bank')}
                     />
                   </div>
                 </div>
@@ -533,6 +549,15 @@ export default function App() {
             {/* View 5: Official KYC Demand Notice (BNSS Sec 94) */}
             {activeTab === 'kyc' && (
               <KycLetterGenerator
+                document={currentDoc}
+                language={language}
+                onBack={() => setActiveTab('html')}
+              />
+            )}
+
+            {/* View 6: Bank Verification / Lien Hold Notice (BNSS Sec 94 & BSA Sec 63) */}
+            {activeTab === 'bank' && (
+              <BankVerificationLetterGenerator
                 document={currentDoc}
                 language={language}
                 onBack={() => setActiveTab('html')}

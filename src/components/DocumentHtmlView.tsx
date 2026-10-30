@@ -23,9 +23,15 @@ interface Props {
   document: CyberCrimeDocument;
   language: 'gu' | 'en';
   onGenerateKycLetter?: () => void;
+  onGenerateBankLetter?: () => void;
 }
 
-export const DocumentHtmlView: React.FC<Props> = ({ document: doc, language, onGenerateKycLetter }) => {
+export const DocumentHtmlView: React.FC<Props> = ({
+  document: doc,
+  language,
+  onGenerateKycLetter,
+  onGenerateBankLetter,
+}) => {
   const [filterQuery, setFilterQuery] = useState('');
   const [selectedLayer, setSelectedLayer] = useState<string>('all');
   const [activeLetterModal, setActiveLetterModal] = useState<string | null>(null);
@@ -370,10 +376,36 @@ export const DocumentHtmlView: React.FC<Props> = ({ document: doc, language, onG
                 {isGu ? '૪. મની ટ્રાન્સફર ટ્રેઇલ (મલ્ટિ-લેયર ફ્લો)' : '4. Money Transfer Trail (Multi-Layer Investigation Trail)'}
               </h2>
             </div>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-semibold">Layer 1 (SBI)</span>
-              <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-900 font-semibold">Layer 2 (Yes Bank)</span>
-              <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 font-semibold">Layer 3 (Paytm)</span>
+
+            {/* Dynamic Layer & Bank Badges from actual document data */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {Array.from(
+                new Map(
+                  doc.moneyTransferTrail.map((item) => {
+                    const layerNum = item.layer || 'Layer : 1';
+                    const isOther =
+                      item.destinationBank?.toLowerCase().includes('other') ||
+                      item.destinationBank?.toLowerCase().includes('npci') ||
+                      item.destinationBank?.toLowerCase().includes('upi') ||
+                      item.destinationAccountNo?.includes('@');
+                    const bank = isOther ? 'NPCI' : item.destinationBank || 'Bank';
+                    return [layerNum, `${layerNum} (${bank})`];
+                  })
+                ).values()
+              ).map((label, idx) => (
+                <span
+                  key={idx}
+                  className={`px-2.5 py-0.5 rounded font-semibold text-[11px] ${
+                    idx === 0
+                      ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                      : idx === 1
+                      ? 'bg-rose-100 text-rose-900 border border-rose-300'
+                      : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                  }`}
+                >
+                  {label}
+                </span>
+              ))}
             </div>
           </div>
 
@@ -570,7 +602,11 @@ export const DocumentHtmlView: React.FC<Props> = ({ document: doc, language, onG
             <div className="flex justify-end mt-3 no-print">
               <button
                 type="button"
-                onClick={() => setActiveLetterModal('bank_verification')}
+                onClick={() =>
+                  onGenerateBankLetter
+                    ? onGenerateBankLetter()
+                    : setActiveLetterModal('bank_verification')
+                }
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 hover:to-teal-900 text-white font-bold text-xs uppercase tracking-wide rounded-xl shadow-md hover:shadow-lg transition cursor-pointer"
               >
                 <Building2 className="w-4 h-4 text-emerald-200" />

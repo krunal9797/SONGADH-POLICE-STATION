@@ -67,54 +67,46 @@ export const KycLetterGenerator: React.FC<Props> = ({ document: doc, language, o
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedBankId, setSelectedBankId] = useState<string>('all');
 
-  // Extract unique banks and accounts from the money transfer trail
+  // Extract unique banks and accounts from the actual money transfer trail
   const letterTargets: KycLetterTarget[] = useMemo(() => {
     const list: KycLetterTarget[] = [];
     const seen = new Set<string>();
 
-    // 1. Extract from moneyTransferTrail
+    // 1. Process actual trail records from the uploaded document
     doc.moneyTransferTrail.forEach((trail, idx) => {
-      const key = `${trail.destinationBank}-${trail.destinationAccountNo}`;
-      if (!seen.has(key) && trail.destinationBank) {
+      const bankNameRaw = (trail.destinationBank || '').trim();
+      const accountNoRaw = (trail.destinationAccountNo || trail.senderAccountNo || '').trim();
+      const remarksRaw = (trail.referenceNoRemarks || '').trim();
+      const utrRaw = (trail.transactionIdUtr || '').trim();
+
+      // Check if this belongs to NPCI:
+      // If bank name is 'Other', contains 'other', 'npci', 'upi', or if account/remarks is a UPI VPA (contains '@')
+      const isOtherOrNpci =
+        bankNameRaw.toLowerCase() === 'other' ||
+        bankNameRaw.toLowerCase().includes('other') ||
+        bankNameRaw.toLowerCase().includes('npci') ||
+        bankNameRaw.toLowerCase().includes('upi') ||
+        accountNoRaw.includes('@') ||
+        remarksRaw.toLowerCase().includes('upi') ||
+        remarksRaw.includes('@');
+
+      const resolvedBankName = isOtherOrNpci ? 'NPCI' : bankNameRaw;
+      if (!resolvedBankName) return;
+
+      const key = `${resolvedBankName}-${accountNoRaw || utrRaw}`;
+      if (!seen.has(key)) {
         seen.add(key);
         list.push({
           id: `target-${idx + 1}`,
-          bankName: trail.destinationBank,
-          accountNumber: trail.destinationAccountNo || trail.senderAccountNo || '-',
-          ifscCode: trail.destinationIfsc || '-',
+          bankName: resolvedBankName,
+          accountNumber: accountNoRaw || '-',
+          ifscCode: isOtherOrNpci ? (trail.destinationIfsc !== '-' ? trail.destinationIfsc : '') : (trail.destinationIfsc || '-'),
           accountHolderName: '',
-          transactionId: trail.transactionIdUtr || '-',
-          layer: trail.layer || 'Layer : 1',
+          transactionId: utrRaw || '-',
+          layer: trail.layer || `Layer : ${idx + 1}`,
         });
       }
     });
-
-    // 2. If NPCI isn't present, check if there's UPI / VPA in references or add NPCI as in official notice sample
-    const hasNpci = list.some((item) => item.bankName.toUpperCase().includes('NPCI'));
-    if (!hasNpci) {
-      list.push({
-        id: 'target-npci',
-        bankName: 'NPCI',
-        accountNumber: 'sagarmehta09415@oksbi',
-        ifscCode: '',
-        accountHolderName: '',
-        transactionId: doc.moneyTransferTrail[0]?.transactionIdUtr || '625342789639',
-        layer: 'UPI / VPA Gateway',
-      });
-    }
-
-    // Fallback if empty
-    if (list.length === 0) {
-      list.push({
-        id: 'target-default-1',
-        bankName: 'State Bank of India',
-        accountNumber: '00000045507539522',
-        ifscCode: 'SBIN0051455',
-        accountHolderName: '',
-        transactionId: '960186230585',
-        layer: 'Layer : 1',
-      });
-    }
 
     return list;
   }, [doc]);
@@ -401,7 +393,7 @@ ${officerPhone}`;
 
                 {/* Subject Line */}
                 <div className="text-center my-4 font-sans">
-                  <div className="font-bold text-xs sm:text-sm text-slate-950 underline">
+                  <div className="font-bold text-xs sm:text-sm text-slate-950">
                     Subject: Request for KYC and Transaction Details of Fraudulent Account
                   </div>
                 </div>

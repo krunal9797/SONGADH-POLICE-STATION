@@ -18,8 +18,8 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Candidate models for OCR in case of 503 spikes on a single model
-const CANDIDATE_MODELS = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+// Candidate models for OCR. gemini-3.1-flash-lite has separate free tier quota and fast latency
+const CANDIDATE_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
 
 async function callGeminiWithFallback(contents: any, config: any) {
   let lastError: any = null;
@@ -38,8 +38,14 @@ async function callGeminiWithFallback(contents: any, config: any) {
       } catch (err: any) {
         lastError = err;
         const errMsg = err?.message || String(err);
-        if (errMsg.includes('503') || errMsg.includes('429') || errMsg.includes('demand') || errMsg.includes('UNAVAILABLE')) {
-          await new Promise((r) => setTimeout(r, 1200 * attempt));
+
+        // If quota exhausted (429 RESOURCE_EXHAUSTED), do not retry this model - immediately jump to next model
+        if (errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota exceeded') || errMsg.includes('limit: 20')) {
+          break;
+        }
+
+        if (errMsg.includes('503') || errMsg.includes('demand') || errMsg.includes('UNAVAILABLE')) {
+          await new Promise((r) => setTimeout(r, 1000 * attempt));
         } else {
           break;
         }

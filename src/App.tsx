@@ -196,7 +196,19 @@ export default function App() {
         rawMsg.includes('UNAVAILABLE') || 
         rawMsg.includes('temporary');
 
-      if (isDemandSpike) {
+      const isQuotaExceeded =
+        rawMsg.includes('429') ||
+        rawMsg.includes('RESOURCE_EXHAUSTED') ||
+        rawMsg.includes('Quota exceeded') ||
+        rawMsg.includes('free_tier_requests');
+
+      if (isQuotaExceeded) {
+        setErrorMessage(
+          isGu
+            ? 'API કીની ફ્રી ટાયર દૈનિક મર્યાદા (Daily Free Quota) પૂર્ણ થઈ ગઈ છે. કૃપા કરીને થોડો સમય રાહ જુઓ અથવા બિલિંગ સક્ષમ API કી નો ઉપયોગ કરો.'
+            : 'Gemini API Free Tier daily quota limit was reached. Please wait or use an API key with billing enabled.'
+        );
+      } else if (isDemandSpike) {
         setErrorMessage(
           isGu
             ? 'Google સર્વર પર હાલમાં ખૂબ વધુ ટ્રાફિક (High Demand) હોવાથી કામચલાઉ વિલંબ છે. કૃપા કરીને થોડી સેકન્ડ પછી નીચે આપેલ "ફરી પ્રયાસ કરો" બટન દબાવો.'
@@ -235,8 +247,8 @@ export default function App() {
                   <h1 className="text-base font-bold text-white tracking-tight">
                     {isGu ? 'PDF થી HTML/CSS રૂપાંતરણ અને OCR વ્યુઅર' : 'PDF to HTML/CSS OCR Viewer'}
                   </h1>
-                  <span className="text-[10px] bg-blue-500/20 text-blue-300 font-semibold px-2 py-0.5 rounded-full border border-blue-400/30">
-                    Gemini 3.8 Flash
+                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-400/30">
+                    Gemini 3.1 Flash Lite
                   </span>
                 </div>
                 <div className="text-xs text-slate-400 flex items-center gap-1.5 mt-0.5">

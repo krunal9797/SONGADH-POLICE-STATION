@@ -1,1 +1,85 @@
 @import "tailwindcss";
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 8mm 10mm;
+  }
+
+  /* Hide all UI elements, toolbars, buttons, headers, footers */
+  .no-print,
+  header,
+  footer,
+  nav,
+  button,
+  .print-hidden {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Ensure clean white background and full page width for printable content */
+  html,
+  body,
+  #root,
+  main {
+    background: #ffffff !important;
+    background-color: #ffffff !important;
+    color: #000000 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-shadow: none !important;
+    border: none !important;
+  }
+
+  /* Dedicated single-page A4 sheet container */
+  .a4-print-sheet {
+    box-shadow: none !important;
+    border: 2.5px solid #000000 !important;
+    margin: 0 auto !important;
+    padding: 6mm 8mm !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    min-height: auto !important;
+    height: auto !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  /* Page break rules between multiple letters */
+  .a4-print-sheet:not(:last-child) {
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  .a4-print-sheet:last-child {
+    page-break-after: avoid !important;
+    break-after: avoid !important;
+  }
+
+  /* Inner frame inside A4 sheet */
+  .a4-inner-frame {
+    border: 1px solid #000000 !important;
+    padding: 5mm 6mm !important;
+    height: auto !important;
+    min-height: auto !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Keep colors & logos crisp */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  img {
+    max-width: 100% !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

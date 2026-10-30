@@ -307,17 +307,16 @@ ${officerPhone}`;
 
       {/* Official Letters Area (A4 Paper Print Formats) */}
       <div className="space-y-8 print:space-y-0">
-        {displayedTargets.map((target, index) => (
+        {displayedTargets.map((target) => (
           <div
             key={target.id}
-            className="bg-white mx-auto shadow-2xl rounded-none border-2 border-slate-800 text-slate-900 font-serif p-8 sm:p-12 max-w-[850px] relative print:shadow-none print:border-3 print:border-black print:m-0 print:p-8 print:max-w-none print:w-full print:page-break-after-always"
+            className="a4-print-sheet bg-white mx-auto shadow-2xl rounded-none border-2 border-slate-800 text-slate-900 font-serif p-6 sm:p-10 max-w-[850px] relative print:shadow-none print:border-2 print:border-black print:m-0 print:p-0 print:max-w-none print:w-full"
             style={{
-              minHeight: '1100px',
               fontFamily: '"Times New Roman", Times, Georgia, serif',
             }}
           >
             {/* Inner Double Border Frame (Matching Official Police Notice) */}
-            <div className="border border-slate-800 p-6 sm:p-8 h-full flex flex-col justify-between print:border-slate-900">
+            <div className="a4-inner-frame border border-slate-800 p-5 sm:p-7 flex flex-col justify-between print:border-black">
               {/* Header with Police Emblems and Police Station Name */}
               <div>
                 <div className="flex items-center justify-between border-b-2 border-slate-900 pb-4 mb-4">

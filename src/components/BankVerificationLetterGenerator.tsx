@@ -160,7 +160,6 @@ export const BankVerificationLetterGenerator: React.FC<Props> = ({
 ${district}
 Mobile No : ${officerPhone || '+916359626151'}
 E-mail ID: ${emailId}
-
 NOTICE UNDER SECTION 94 OF B.N.S.S 2023
 UNDER SECTION 63 OF BSA ACT 2023
 Outward number ${outwardNo},
@@ -415,7 +414,7 @@ ${officerPhone}`;
                 </div>
 
                   {/* Legal Act Reference Headings */}
-                  <div className="text-center space-y-1 my-3">
+                  <div className="text-center space-y-0">
                     <div className="font-bold text-xs sm:text-sm tracking-wide text-slate-950 underline">
                       NOTICE UNDER SECTION 94 OF B.N.S.S 2023
                     </div>

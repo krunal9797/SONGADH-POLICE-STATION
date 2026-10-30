@@ -369,8 +369,8 @@ ${officerPhone}`;
                 fontFamily: '"Times New Roman", Times, Georgia, serif',
               }}
             >
-              {/* Inner Border Frame (Active inside border as requested) */}
-              <div className="a4-inner-frame border-2 border-slate-900 p-5 sm:p-7 h-full flex flex-col justify-between print:border-2 print:border-black">
+              {/* Inner Content Frame (Borderless as requested) */}
+              <div className="a4-inner-frame p-2 sm:p-4 flex flex-col">
                 {/* Header Enclosed Box (Matching user design image_7b14bf25.png) */}
                 <div className="border-[2.5px] border-black p-3.5 sm:p-4 mb-4 flex items-center justify-between bg-white">
                   {/* Left Gujarat Police Logo */}
@@ -556,8 +556,8 @@ ${officerPhone}`;
                     <p className="font-bold pt-1">Thank you.</p>
                   </div>
 
-                {/* Officer Signature & Authority Stamp Block (Bottom Right) */}
-                <div className="pt-6">
+                {/* Officer Signature & Authority Stamp Block (Bottom Right - shifted up) */}
+                <div className="pt-2 mt-4">
                   <div className="flex justify-end text-xs font-sans">
                     <div className="text-center w-64 space-y-0.5">
                       <div className="font-bold text-sm text-slate-950">({officerName})</div>

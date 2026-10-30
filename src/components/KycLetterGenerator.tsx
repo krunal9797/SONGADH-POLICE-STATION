@@ -315,8 +315,8 @@ ${officerPhone}`;
               fontFamily: '"Times New Roman", Times, Georgia, serif',
             }}
           >
-            {/* Inner Border Frame (Active inside border as requested) */}
-            <div className="a4-inner-frame border-2 border-slate-900 p-5 sm:p-7 flex flex-col justify-between print:border-2 print:border-black">
+            {/* Inner Content Frame (Borderless as requested) */}
+            <div className="a4-inner-frame p-2 sm:p-4 flex flex-col">
                 {/* Header Enclosed Box (Matching user design image_7b14bf25.png) */}
                 <div className="border-[2.5px] border-black p-3.5 sm:p-4 mb-4 flex items-center justify-between bg-white">
                   {/* Left Gujarat Police Logo */}
@@ -480,10 +480,10 @@ ${officerPhone}`;
                   <div className="pt-2 font-semibold">Thank You.</div>
                 </div>
 
-              {/* Signature Block (Bottom Right) */}
-              <div className="flex justify-end mt-12 pt-6 font-sans">
+              {/* Signature Block (Bottom Right - shifted up to prevent page cut) */}
+              <div className="flex justify-end mt-4 pt-2 font-sans">
                 <div className="text-center text-xs font-bold space-y-0.5 text-slate-950 min-w-[220px]">
-                  <div className="mb-8 font-normal italic text-slate-400 no-print">
+                  <div className="mb-2 font-normal italic text-slate-400 text-[10px] no-print">
                     [Signature / Seal]
                   </div>
                   <div className="font-black text-sm">({officerName})</div>

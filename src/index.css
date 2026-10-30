@@ -41,7 +41,7 @@
     box-shadow: none !important;
     border: none !important;
     margin: 0 auto !important;
-    padding: 4mm 6mm !important;
+    padding: 3mm 5mm !important;
     width: 100% !important;
     max-width: 100% !important;
     box-sizing: border-box !important;
@@ -62,10 +62,10 @@
     break-after: avoid !important;
   }
 
-  /* Inner frame inside A4 sheet - active border as requested by user */
+  /* Inner frame inside A4 sheet - completely borderless */
   .a4-inner-frame {
-    border: 2px solid #000000 !important;
-    padding: 6mm 8mm !important;
+    border: none !important;
+    padding: 0 !important;
     height: auto !important;
     min-height: auto !important;
     box-sizing: border-box !important;

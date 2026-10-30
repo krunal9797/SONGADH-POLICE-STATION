@@ -14,17 +14,21 @@ import {
   ExternalLink,
   CheckCircle2,
   Lock,
-  Layers
+  Layers,
+  FileCheck2,
+  Video,
 } from 'lucide-react';
 
 interface Props {
   document: CyberCrimeDocument;
   language: 'gu' | 'en';
+  onGenerateKycLetter?: () => void;
 }
 
-export const DocumentHtmlView: React.FC<Props> = ({ document: doc, language }) => {
+export const DocumentHtmlView: React.FC<Props> = ({ document: doc, language, onGenerateKycLetter }) => {
   const [filterQuery, setFilterQuery] = useState('');
   const [selectedLayer, setSelectedLayer] = useState<string>('all');
+  const [activeLetterModal, setActiveLetterModal] = useState<string | null>(null);
 
   const isGu = language === 'gu';
 
@@ -434,6 +438,18 @@ export const DocumentHtmlView: React.FC<Props> = ({ document: doc, language }) =
               </tbody>
             </table>
           </div>
+
+          {/* Right-aligned action button */}
+          <div className="flex justify-end mt-3 no-print">
+            <button
+              type="button"
+              onClick={() => onGenerateKycLetter ? onGenerateKycLetter() : setActiveLetterModal('kyc')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-800 hover:to-indigo-800 text-white font-bold text-xs uppercase tracking-wide rounded-xl shadow-md hover:shadow-lg transition cursor-pointer"
+            >
+              <FileCheck2 className="w-4 h-4 text-amber-300" />
+              <span>GENERATE KYC LETTER</span>
+            </button>
+          </div>
         </section>
 
         {/* 5. ATM Withdrawals & Locations */}
@@ -497,6 +513,18 @@ export const DocumentHtmlView: React.FC<Props> = ({ document: doc, language }) =
               </tbody>
             </table>
           </div>
+
+          {/* Right-aligned action button */}
+          <div className="flex justify-end mt-3 no-print">
+            <button
+              type="button"
+              onClick={() => setActiveLetterModal('cctv')}
+              className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-rose-700 to-red-800 hover:from-rose-800 hover:to-red-900 text-white font-bold text-xs uppercase tracking-wide rounded-xl shadow-md hover:shadow-lg transition cursor-pointer"
+            >
+              <Video className="w-4 h-4 text-amber-300" />
+              <span>GENERATE CCTV FOOTAGE LETTER</span>
+            </button>
+          </div>
         </section>
 
         {/* 6. Transactions Put on Hold & Pending Disputes */}
@@ -536,6 +564,18 @@ export const DocumentHtmlView: React.FC<Props> = ({ document: doc, language }) =
                   ))}
                 </tbody>
               </table>
+            </div>
+
+            {/* Right-aligned action button */}
+            <div className="flex justify-end mt-3 no-print">
+              <button
+                type="button"
+                onClick={() => setActiveLetterModal('bank_verification')}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 hover:to-teal-900 text-white font-bold text-xs uppercase tracking-wide rounded-xl shadow-md hover:shadow-lg transition cursor-pointer"
+              >
+                <Building2 className="w-4 h-4 text-emerald-200" />
+                <span>GENERATE BANK VERIFICATION LETTER</span>
+              </button>
             </div>
           </div>
 
@@ -614,6 +654,74 @@ export const DocumentHtmlView: React.FC<Props> = ({ document: doc, language }) =
           </p>
         </div>
       </div>
+
+      {/* Interactive Letter Modal Indicator */}
+      {activeLetterModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 text-xs">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-2">
+                <div className={`p-2 rounded-xl text-white ${
+                  activeLetterModal === 'kyc'
+                    ? 'bg-blue-600'
+                    : activeLetterModal === 'cctv'
+                    ? 'bg-rose-600'
+                    : 'bg-emerald-600'
+                }`}>
+                  {activeLetterModal === 'kyc' ? (
+                    <FileCheck2 className="w-5 h-5" />
+                  ) : activeLetterModal === 'cctv' ? (
+                    <Video className="w-5 h-5" />
+                  ) : (
+                    <Building2 className="w-5 h-5" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 uppercase">
+                    {activeLetterModal === 'kyc'
+                      ? 'GENERATE KYC LETTER'
+                      : activeLetterModal === 'cctv'
+                      ? 'GENERATE CCTV FOOTAGE LETTER'
+                      : 'GENERATE BANK VERIFICATION LETTER'}
+                  </h3>
+                  <span className="text-[11px] text-emerald-600 font-semibold flex items-center gap-1 mt-0.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 inline" />
+                    બટન સફળતાપૂર્વક સક્રિય છે (Active)
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveLetterModal(null)}
+                className="text-slate-400 hover:text-slate-700 text-lg font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-2 text-slate-700">
+              <p className="font-medium">
+                {isGu
+                  ? 'આ બટન સફળતાપૂર્વક બનાવી દેવામાં આવ્યું છે! હવે તમારી આગલી સૂચના (Next Instruction) આપો કે આ લેટરમાં કઈ-કઈ વિગતો, પોલીસ નોટિસ ફોર્મેટ, અથવા બેંક એપ્લિકેશન ટેમ્પલેટ જનરેટ કરાવવું છે.'
+                  : 'This button is successfully active! Please provide your next instructions for the letter template, format, or required details.'}
+              </p>
+              <div className="text-[11px] text-slate-500 pt-1 border-t border-slate-200">
+                Acknowledgement: <strong>{doc.acknowledgement.acknowledgementNo}</strong> • e-Zero FIR: <strong>{doc.actionTaken.eZeroFirNo}</strong>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => setActiveLetterModal(null)}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition cursor-pointer"
+              >
+                {isGu ? 'બંધ કરો (Close)' : 'Close'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

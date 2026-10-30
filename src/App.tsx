@@ -4,6 +4,7 @@ import { DocumentHtmlView } from './components/DocumentHtmlView';
 import { MoneyTrailGraph } from './components/MoneyTrailGraph';
 import { OriginalPdfViewer } from './components/OriginalPdfViewer';
 import { RawDataViewer } from './components/RawDataViewer';
+import { KycLetterGenerator } from './components/KycLetterGenerator';
 import {
   Upload,
   RotateCcw,
@@ -17,13 +18,14 @@ import {
   Globe,
   Loader2,
   Sparkles,
+  FileCheck2,
 } from 'lucide-react';
 
 export default function App() {
   const [currentDoc, setCurrentDoc] = useState<CyberCrimeDocument | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'html' | 'split' | 'trail' | 'code'>('html');
+  const [activeTab, setActiveTab] = useState<'html' | 'split' | 'trail' | 'code' | 'kyc'>('html');
   const [language, setLanguage] = useState<'gu' | 'en'>('gu');
   const [isProcessing, setIsProcessing] = useState(false);
   const [ocrStep, setOcrStep] = useState<string>('');
@@ -358,6 +360,18 @@ export default function App() {
                 <Code2 className="w-4 h-4" />
                 <span>{isGu ? '૪. HTML / CSS / JSON કોડ' : '4. Standalone HTML & Code'}</span>
               </button>
+
+              <button
+                onClick={() => setActiveTab('kyc')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition whitespace-nowrap ${
+                  activeTab === 'kyc'
+                    ? 'bg-blue-600 text-white font-bold shadow-xs'
+                    : 'text-amber-400 hover:text-amber-300 hover:bg-slate-800/60 font-semibold'
+                }`}
+              >
+                <FileCheck2 className="w-4 h-4 text-amber-400" />
+                <span>{isGu ? '૫. KYC લેટર (BNSS 94)' : '5. KYC Notice (BNSS 94)'}</span>
+              </button>
             </div>
           </div>
         )}
@@ -472,7 +486,11 @@ export default function App() {
           <div className="space-y-6">
             {/* View 1: HTML & CSS Rendered Document */}
             {activeTab === 'html' && (
-              <DocumentHtmlView document={currentDoc} language={language} />
+              <DocumentHtmlView
+                document={currentDoc}
+                language={language}
+                onGenerateKycLetter={() => setActiveTab('kyc')}
+              />
             )}
 
             {/* View 2: Split View (Original PDF ↔ HTML/CSS) */}
@@ -492,7 +510,11 @@ export default function App() {
                     <span>{isGu ? 'જમણી બાજુ: HTML & CSS રેન્ડર કરેલ દસ્તાવેજ' : 'Right: Rendered HTML/CSS Document'}</span>
                   </div>
                   <div className="max-h-[850px] overflow-y-auto rounded-xl shadow-inner border border-slate-200">
-                    <DocumentHtmlView document={currentDoc} language={language} />
+                    <DocumentHtmlView
+                      document={currentDoc}
+                      language={language}
+                      onGenerateKycLetter={() => setActiveTab('kyc')}
+                    />
                   </div>
                 </div>
               </div>
@@ -506,6 +528,15 @@ export default function App() {
             {/* View 4: HTML & JSON Code Inspector */}
             {activeTab === 'code' && (
               <RawDataViewer document={currentDoc} language={language} />
+            )}
+
+            {/* View 5: Official KYC Demand Notice (BNSS Sec 94) */}
+            {activeTab === 'kyc' && (
+              <KycLetterGenerator
+                document={currentDoc}
+                language={language}
+                onBack={() => setActiveTab('html')}
+              />
             )}
           </div>
         )}

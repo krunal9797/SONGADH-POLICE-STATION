@@ -1,0 +1,6 @@
+{
+  "name": "PDF to HTML/CSS OCR Viewer",
+  "description": "Convert uploaded PDF documents into fully styled, interactive HTML & CSS with deep OCR data extraction, transaction tables, and export features.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

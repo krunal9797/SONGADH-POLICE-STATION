@@ -158,7 +158,7 @@ export const BankVerificationLetterGenerator: React.FC<Props> = ({
   const handleCopyText = (target: BankLetterTarget) => {
     const text = `SONGADH POLICE STATION
 ${district}
-Tel. no. ${telNo}
+Mobile No : ${officerPhone || '+916359626151'}
 E-mail ID: ${emailId}
 
 NOTICE UNDER SECTION 94 OF B.N.S.S 2023
@@ -364,57 +364,55 @@ ${officerPhone}`;
           displayedTargets.map((target) => (
             <div
               key={target.id}
-              className="bg-white mx-auto shadow-2xl rounded-none border-2 border-slate-800 text-slate-900 font-serif p-8 sm:p-12 max-w-[850px] relative print:shadow-none print:border-3 print:border-black print:m-0 print:p-8 print:max-w-none print:w-full print:page-break-after-always"
+              className="a4-print-sheet bg-white mx-auto shadow-xl rounded-none text-slate-900 font-serif p-4 sm:p-6 max-w-[850px] relative print:shadow-none print:border-none print:m-0 print:p-0 print:max-w-none print:w-full"
               style={{
-                minHeight: '1100px',
                 fontFamily: '"Times New Roman", Times, Georgia, serif',
               }}
             >
-              {/* Inner Double Border Frame (Matching Official Police Notice) */}
-              <div className="border border-slate-800 p-6 sm:p-8 h-full flex flex-col justify-between print:border-slate-900">
-                {/* Header with Police Emblems and Police Station Name */}
-                <div>
-                  <div className="flex items-center justify-between border-b-2 border-slate-900 pb-4 mb-4">
-                    {/* Left Gujarat Police Logo */}
-                    <div className="w-20 h-24 shrink-0 flex items-center justify-center">
-                      <img
-                        src="/police_logo.png"
-                        alt="Gujarat Police"
-                        className="w-20 h-24 object-contain"
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
-                    </div>
+              {/* Inner Border Frame (Active inside border as requested) */}
+              <div className="a4-inner-frame border-2 border-slate-900 p-5 sm:p-7 h-full flex flex-col justify-between print:border-2 print:border-black">
+                {/* Header Enclosed Box (Matching user design image_7b14bf25.png) */}
+                <div className="border-[2.5px] border-black p-3.5 sm:p-4 mb-4 flex items-center justify-between bg-white">
+                  {/* Left Gujarat Police Logo */}
+                  <div className="w-20 h-24 shrink-0 flex items-center justify-center">
+                    <img
+                      src="/police_logo.png"
+                      alt="Gujarat Police"
+                      className="w-20 h-24 object-contain"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  </div>
 
-                    {/* Center Police Station Details */}
-                    <div className="text-center flex-1 px-4">
-                      <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-slate-950">
-                        {policeStation}
-                      </h1>
-                      <div className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-800 mt-0.5">
-                        {district}
-                      </div>
-                      <div className="text-xs font-semibold text-slate-700 mt-1">
-                        Tel. no. {telNo}
-                      </div>
-                      <div className="text-xs font-semibold text-slate-700">
-                        E-mail ID: <span className="underline">{emailId}</span>
-                      </div>
+                  {/* Center Police Station Details */}
+                  <div className="text-center flex-1 px-4 font-sans space-y-0.5">
+                    <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-black">
+                      {policeStation}
+                    </h1>
+                    <div className="text-xs sm:text-sm font-bold uppercase tracking-wider text-black mt-0.5">
+                      {district}
                     </div>
-
-                    {/* Right Gujarat Police Logo */}
-                    <div className="w-20 h-24 shrink-0 flex items-center justify-center">
-                      <img
-                        src="/police_logo.png"
-                        alt="Gujarat Police"
-                        className="w-20 h-24 object-contain"
-                        onError={(e) => {
-                          e.currentTarget.style.display = 'none';
-                        }}
-                      />
+                    <div className="text-xs sm:text-sm font-bold text-black mt-0.5">
+                      Tel. no. {telNo}
+                    </div>
+                    <div className="text-xs sm:text-sm font-bold text-black">
+                      E-mail ID: {emailId}
                     </div>
                   </div>
+
+                  {/* Right Gujarat Police Logo */}
+                  <div className="w-20 h-24 shrink-0 flex items-center justify-center">
+                    <img
+                      src="/police_logo.png"
+                      alt="Gujarat Police"
+                      className="w-20 h-24 object-contain"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                      }}
+                    />
+                  </div>
+                </div>
 
                   {/* Legal Act Reference Headings */}
                   <div className="text-center space-y-1 my-3">
@@ -445,13 +443,13 @@ ${officerPhone}`;
                     <div className="font-bold text-sm text-slate-900">{target.bankName}</div>
                   </div>
 
-                  {/* Subject and Reference Lines */}
-                  <div className="text-left my-3 font-sans space-y-0.5 text-xs sm:text-[12.5px]">
+                  {/* Subject and Reference Lines (Centered with Reference directly below Subject) */}
+                  <div className="text-center my-3.5 font-sans space-y-1 text-xs sm:text-[13px]">
                     <div className="font-bold text-slate-950">
                       Subject: Provide Information related to Accounts to prepare a court order.
                     </div>
                     <div className="font-bold text-slate-950">
-                      Reference: Acknowledgement No. {doc.acknowledgement.acknowledgementNo}
+                      Reference: Acknowledgement No. {doc.acknowledgement.acknowledgementNo || '31109260232375'}
                     </div>
                   </div>
 
@@ -557,7 +555,6 @@ ${officerPhone}`;
 
                     <p className="font-bold pt-1">Thank you.</p>
                   </div>
-                </div>
 
                 {/* Officer Signature & Authority Stamp Block (Bottom Right) */}
                 <div className="pt-6">

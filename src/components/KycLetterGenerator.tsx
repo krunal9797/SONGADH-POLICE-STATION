@@ -119,7 +119,7 @@ export const KycLetterGenerator: React.FC<Props> = ({ document: doc, language, o
   const handleCopyText = (target: KycLetterTarget) => {
     const text = `SONGADH POLICE STATION
 ${district}
-Tel. no. ${telNo}
+Mobile No : ${officerPhone || '+916359626151'}
 E-mail ID: ${emailId}
 
 NOTICE UNDER SECTION 94 OF B.N.S.S 2023
@@ -310,16 +310,15 @@ ${officerPhone}`;
         {displayedTargets.map((target) => (
           <div
             key={target.id}
-            className="a4-print-sheet bg-white mx-auto shadow-2xl rounded-none border-2 border-slate-800 text-slate-900 font-serif p-6 sm:p-10 max-w-[850px] relative print:shadow-none print:border-2 print:border-black print:m-0 print:p-0 print:max-w-none print:w-full"
+            className="a4-print-sheet bg-white mx-auto shadow-xl rounded-none text-slate-900 font-serif p-4 sm:p-6 max-w-[850px] relative print:shadow-none print:border-none print:m-0 print:p-0 print:max-w-none print:w-full"
             style={{
               fontFamily: '"Times New Roman", Times, Georgia, serif',
             }}
           >
-            {/* Inner Double Border Frame (Matching Official Police Notice) */}
-            <div className="a4-inner-frame border border-slate-800 p-5 sm:p-7 flex flex-col justify-between print:border-black">
-              {/* Header with Police Emblems and Police Station Name */}
-              <div>
-                <div className="flex items-center justify-between border-b-2 border-slate-900 pb-4 mb-4">
+            {/* Inner Border Frame (Active inside border as requested) */}
+            <div className="a4-inner-frame border-2 border-slate-900 p-5 sm:p-7 flex flex-col justify-between print:border-2 print:border-black">
+                {/* Header Enclosed Box (Matching user design image_7b14bf25.png) */}
+                <div className="border-[2.5px] border-black p-3.5 sm:p-4 mb-4 flex items-center justify-between bg-white">
                   {/* Left Gujarat Police Logo */}
                   <div className="w-20 h-24 shrink-0 flex items-center justify-center">
                     <img
@@ -334,18 +333,18 @@ ${officerPhone}`;
                   </div>
 
                   {/* Center Police Station Details */}
-                  <div className="text-center flex-1 px-4">
-                    <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-slate-950">
+                  <div className="text-center flex-1 px-4 font-sans space-y-0.5">
+                    <h1 className="text-xl sm:text-2xl font-black uppercase tracking-wider text-black">
                       {policeStation}
                     </h1>
-                    <div className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-800 mt-0.5">
+                    <div className="text-xs sm:text-sm font-bold uppercase tracking-wider text-black mt-0.5">
                       {district}
                     </div>
-                    <div className="text-xs font-semibold text-slate-700 mt-1">
+                    <div className="text-xs sm:text-sm font-bold text-black mt-0.5">
                       Tel. no. {telNo}
                     </div>
-                    <div className="text-xs font-semibold text-slate-700">
-                      E-mail ID: <span className="underline">{emailId}</span>
+                    <div className="text-xs sm:text-sm font-bold text-black">
+                      E-mail ID: {emailId}
                     </div>
                   </div>
 
@@ -362,13 +361,11 @@ ${officerPhone}`;
                   </div>
                 </div>
 
-                {/* Notice Box Title */}
-                <div className="text-center my-4">
-                  <div className="inline-block border-b-2 border-t-2 border-slate-900 py-1 px-6">
-                    <h2 className="text-sm sm:text-base font-black tracking-wide uppercase text-slate-950">
-                      NOTICE UNDER SECTION 94 OF B.N.S.S 2023
-                    </h2>
-                  </div>
+                {/* Notice Title (Top/Bottom lines removed, simple clean underline) */}
+                <div className="text-center my-3">
+                  <h2 className="text-sm sm:text-base font-black tracking-wide uppercase text-slate-950 underline">
+                    NOTICE UNDER SECTION 94 OF B.N.S.S 2023
+                  </h2>
                 </div>
 
                 {/* Outward Number and Date */}
@@ -482,7 +479,6 @@ ${officerPhone}`;
 
                   <div className="pt-2 font-semibold">Thank You.</div>
                 </div>
-              </div>
 
               {/* Signature Block (Bottom Right) */}
               <div className="flex justify-end mt-12 pt-6 font-sans">

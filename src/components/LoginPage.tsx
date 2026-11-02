@@ -230,15 +230,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           <div className="flex items-center gap-3">
             <img
               src="/police_logo.png"
-              alt="Gujarat Police Emblem"
+              alt="Police Emblem"
               className="h-10 w-auto object-contain drop-shadow"
               onError={(e) => {
                 (e.target as HTMLElement).style.display = 'none';
               }}
             />
             <div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-extrabold tracking-wider text-white">GUJARAT POLICE</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm sm:text-base font-extrabold tracking-wider text-white">
+                  CYBER EXPERT TAPI (SONGADH POLICE STATION)
+                </span>
                 <span className="text-[10px] bg-blue-500/20 text-blue-300 border border-blue-400/30 px-2 py-0.5 rounded-full font-mono font-bold">
                   CYBER CELL
                 </span>
@@ -251,7 +253,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
           <div className="hidden sm:flex items-center gap-2 text-xs text-amber-400/90 font-medium bg-amber-950/40 border border-amber-800/40 px-3 py-1.5 rounded-lg">
             <ShieldCheck className="w-4 h-4 text-amber-400" />
-            <span>અધિકૃત પોલીસ પોર્ટલ (Restricted Access)</span>
+            <span>અધિકૃત પોર્ટલ (Restricted Access)</span>
           </div>
         </div>
       </header>
@@ -264,7 +266,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             <div className="w-20 h-20 mx-auto mb-3 bg-gradient-to-tr from-blue-600 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 border-2 border-blue-400/30 p-2">
               <img
                 src="/police_logo.png"
-                alt="Gujarat Police"
+                alt="Police Logo"
                 className="w-full h-full object-contain"
                 onError={(e) => {
                   (e.target as HTMLElement).style.display = 'none';
@@ -272,14 +274,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               />
             </div>
 
-            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              પોલીસ અધિકારી લૉગિન
+            <h2 className="text-base sm:text-lg font-black text-white tracking-tight">
+              CYBER EXPERT TAPI (SONGADH POLICE STATION)
             </h2>
-            <p className="text-xs text-blue-200/80 mt-1">
-              Gujarat Police Cyber Crime Investigation Portal
+            <p className="text-xs text-blue-200/90 font-medium mt-1">
+              સાયબર એક્સપર્ટ તાપી • સોનગઢ પોલીસ સ્ટેશન
             </p>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              સોનગઢ પોલીસ સ્ટેશન • જિ. તાપી
+              અધિકારી લૉગિન • NCRP 1930 ઇન્વેસ્ટિગેશન પોર્ટલ
             </p>
           </div>
 
@@ -470,7 +472,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
             {/* Official Security Notice */}
             <div className="pt-3 border-t border-slate-800 text-[10px] text-slate-500 text-center leading-relaxed">
-              🔒 <span className="text-slate-400 font-medium">સુરક્ષા નોટિસ:</span> આ એપ્લિકેશન ગુજરાત પોલીસ સાયબર ક્રાઈમ ઇન્વેસ્ટિગેશન માટે અધિકૃત છે.
+              🔒 <span className="text-slate-400 font-medium">સુરક્ષા નોટિસ:</span> આ એપ્લિકેશન CYBER EXPERT TAPI (SONGADH POLICE STATION) માટે અધિકૃત છે.
             </div>
           </div>
         </div>

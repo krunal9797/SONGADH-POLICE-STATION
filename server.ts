@@ -93,11 +93,11 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
     const googleToken = req.body?.googleAccessToken;
     if (googleToken) {
       try {
-        const subject = `પોલીસ પોર્ટલ OTP ચકાસણી કોડ: ${otpCode} - Gujarat Police Cyber Crime Cell`;
+        const subject = `પોલીસ પોર્ટલ OTP ચકાસણી કોડ: ${otpCode} - CYBER EXPERT TAPI (SONGADH POLICE STATION)`;
         const emailBodyHtml = `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
             <div style="background-color: #0f172a; color: #ffffff; padding: 24px; text-align: center;">
-              <h1 style="margin: 0; font-size: 20px; font-weight: bold; letter-spacing: 1px;">GUJARAT POLICE</h1>
+              <h1 style="margin: 0; font-size: 18px; font-weight: bold; letter-spacing: 1px;">CYBER EXPERT TAPI (SONGADH POLICE STATION)</h1>
               <p style="margin: 6px 0 0; font-size: 13px; color: #94a3b8;">Cyber Crime Investigation Cell • Songadh Police Station (Tapi)</p>
             </div>
             <div style="padding: 28px; background-color: #ffffff; color: #1e293b; text-align: center;">

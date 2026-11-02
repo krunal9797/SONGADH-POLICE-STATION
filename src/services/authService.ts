@@ -67,7 +67,7 @@ export async function sendOtpEmailViaGmail(
   targetEmail: string,
   accessToken: string
 ) {
-  const subject = `પોલીસ પોર્ટલ OTP ચકાસણી કોડ: ${otpCode} - Gujarat Police Cyber Crime Cell`;
+  const subject = `પોલીસ પોર્ટલ OTP ચકાસણી કોડ: ${otpCode} - CYBER EXPERT TAPI (SONGADH POLICE STATION)`;
   const emailContent = `To: ${targetEmail}
 Subject: =?UTF-8?B?${btoa(unescape(encodeURIComponent(subject)))}?=
 MIME-Version: 1.0
@@ -77,12 +77,12 @@ Content-Type: text/html; charset=UTF-8
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Gujarat Police OTP</title>
+  <title>CYBER EXPERT TAPI (SONGADH POLICE STATION) OTP</title>
 </head>
 <body style="font-family: Arial, sans-serif; background-color: #f1f5f9; padding: 20px; margin: 0;">
   <div style="max-width: 580px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); border: 1px solid #e2e8f0;">
     <div style="background-color: #0f172a; padding: 24px; text-align: center;">
-      <h1 style="color: #ffffff; margin: 0; font-size: 20px; letter-spacing: 1.5px;">GUJARAT POLICE</h1>
+      <h1 style="color: #ffffff; margin: 0; font-size: 18px; letter-spacing: 1px;">CYBER EXPERT TAPI (SONGADH POLICE STATION)</h1>
       <p style="color: #94a3b8; margin: 6px 0 0; font-size: 13px;">Cyber Crime Cell • Songadh Police Station (Dist. Tapi)</p>
     </div>
     <div style="padding: 32px 24px; text-align: center;">

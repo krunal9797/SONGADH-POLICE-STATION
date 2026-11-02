@@ -10,7 +10,12 @@ import {
   Lock,
   Sparkles,
 } from 'lucide-react';
-import { signInWithGoogle, AUTHORIZED_EMAIL } from '../services/authService';
+import {
+  signInWithGoogle,
+  AUTHORIZED_EMAIL,
+  getCachedAccessToken,
+  sendOtpEmailViaGmail,
+} from '../services/authService';
 
 export interface UserSession {
   email: string;
@@ -58,7 +63,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     }
   }, [isOtpSent]);
 
-  // Direct Sign-In with Google (gamitkrunal7997@gmail.com)
+  // Direct 1-Click Sign-In with Google (gamitkrunal7997@gmail.com)
   const handleGoogleSignIn = async () => {
     setErrorMessage(null);
     setSuccessMessage(null);
@@ -100,7 +105,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     }
   };
 
-  // Send OTP to gamitkrunal7997@gmail.com
+  // Send REAL OTP to gamitkrunal7997@gmail.com via Gmail API
   const handleSendOtp = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMessage(null);
@@ -121,11 +126,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
     setIsLoading(true);
     try {
+      // 1. Ensure we have Google OAuth token to dispatch actual Gmail message
+      let accessToken = getCachedAccessToken();
+      if (!accessToken) {
+        const authResult = await signInWithGoogle();
+        accessToken = authResult.accessToken;
+      }
+
+      // 2. Request new OTP from backend
       const res = await fetch('/api/auth/send-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: trimmedEmail,
+          googleAccessToken: accessToken,
         }),
       });
 
@@ -134,15 +148,25 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         throw new Error(data.error || 'OTP મોકલવામાં નિષ્ફળ રહ્યા.');
       }
 
+      // 3. Dispatch real email via Gmail API directly to inbox
+      if (accessToken && data.otpCode) {
+        try {
+          await sendOtpEmailViaGmail(data.otpCode, trimmedEmail, accessToken);
+        } catch (mailErr: any) {
+          console.warn('Direct client Gmail dispatch warning:', mailErr);
+        }
+      }
+
       setIsOtpSent(true);
       setTimerSeconds(60);
       setCanResend(false);
       setOtp(['', '', '', '', '', '']);
 
       setSuccessMessage(
-        `📨 સુરક્ષા OTP કોડ તમારા ઈમેલ ${trimmedEmail} પર મોકલી દેવામાં આવ્યો છે. કૃપા કરીને તમારું Gmail ઇનબોક્સ ચેક કરો.`
+        `📨 સુરક્ષા OTP કોડ તમારા ઈમેલ ${trimmedEmail} પર સફળતાપૂર્વક મોકલવામાં આવ્યો છે! કૃપા કરીને તમારું Gmail ઇનબોક્સ ચેક કરો.`
       );
     } catch (err: any) {
+      console.error('Send OTP Error:', err);
       setErrorMessage(err.message || 'OTP મોકલવામાં ભૂલ આવી. કૃપા કરીને ફરી પ્રયાસ કરો.');
     } finally {
       setIsLoading(false);

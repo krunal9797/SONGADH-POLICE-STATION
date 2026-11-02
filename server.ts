@@ -181,6 +181,7 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
     return res.json({
       success: true,
       emailSent,
+      otpCode, // Used for direct Gmail API dispatch from client browser
       message: `OTP સફળતાપૂર્વક તમારા ઈમેલ ${rawEmail} પર મોકલવામાં આવ્યો છે. કૃપા કરીને તમારું ઇનબોક્સ ચેક કરો.`,
     });
   } catch (err: any) {

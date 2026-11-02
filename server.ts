@@ -233,6 +233,55 @@ app.post('/api/auth/google-login', async (req: Request, res: Response) => {
   }
 });
 
+// Route: Officer Security Passkey / Master PIN (Guaranteed login on Vercel & unauthorized domains)
+app.post('/api/auth/verify-pin', async (req: Request, res: Response) => {
+  try {
+    const email = (req.body?.email || '').trim().toLowerCase();
+    const pin = (req.body?.pin || '').trim();
+
+    if (!email || email !== AUTHORIZED_EMAIL.toLowerCase()) {
+      return res.status(403).json({
+        success: false,
+        error: `અનધિકૃત એકાઉન્ટ! ફક્ત અધિકૃત અધિકારી (${AUTHORIZED_EMAIL}) ને જ પ્રવેશની મંજૂરી છે.`,
+      });
+    }
+
+    // Accepted secure officer PINs for Er. Krunal Gamit
+    const validPins = ['704331', '7997', '193000', '525525'];
+    if (!validPins.includes(pin)) {
+      return res.status(400).json({
+        success: false,
+        error: 'અમાન્ય ઓફિસર સિક્યુરિટી PIN! કૃપા કરીને સાચો સિક્યુરિટી કોડ દાખલ કરો.',
+      });
+    }
+
+    const token = 'police_pin_' + Buffer.from(`${email}:${Date.now()}:${Math.random()}`).toString('hex');
+    const officerProfile = {
+      email,
+      name: 'Er. Krunal Gamit',
+      role: 'Cyber Crime Investigation Officer',
+      station: 'Songadh Police Station, Dist. Tapi',
+      phone: '+917043311587',
+      loginTime: Date.now(),
+    };
+
+    activeSessions.set(token, officerProfile);
+
+    return res.json({
+      success: true,
+      message: 'ઓફિસર સિક્યુરિટી PIN વડે સફળતાપૂર્વક લૉગિન થયું!',
+      token,
+      user: officerProfile,
+    });
+  } catch (err: any) {
+    console.error('Verify PIN error:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'PIN ચકાસણીમાં સર્વર ક્ષતિ આવી.',
+    });
+  }
+});
+
 // Route: Verify OTP and establish session
 app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
   try {

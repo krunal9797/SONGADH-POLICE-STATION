@@ -193,6 +193,48 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
   }
 });
 
+// Route: Primary Officer Login (Username: krunal9797, Password: 7997)
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  try {
+    const username = (req.body?.username || '').trim();
+    const password = (req.body?.password || '').trim();
+
+    const isValidUser =
+      username.toLowerCase() === 'krunal9797' ||
+      username.toLowerCase() === 'gamitkrunal7997@gmail.com';
+    const isValidPass = password === '7997';
+
+    if (!isValidUser || !isValidPass) {
+      return res.status(401).json({
+        success: false,
+        error: 'ખોટો યુઝરનેમ અથવા પાસવર્ડ! કૃપા કરીને સાચી વિગત દાખલ કરો.',
+      });
+    }
+
+    const token = 'police_auth_' + Buffer.from(`${username}:${Date.now()}:${Math.random()}`).toString('hex');
+    const officerProfile = {
+      username: 'krunal9797',
+      email: 'gamitkrunal7997@gmail.com',
+      name: 'Er. Krunal Gamit',
+      role: 'Cyber Crime Investigation Officer',
+      station: 'Songadh Police Station, Dist. Tapi',
+      phone: '+917043311587',
+      loginTime: Date.now(),
+    };
+
+    activeSessions.set(token, officerProfile);
+
+    return res.json({
+      success: true,
+      message: 'સફળતાપૂર્વક લૉગિન થયું!',
+      token,
+      user: officerProfile,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: 'લૉગિનમાં ક્ષતિ આવી.' });
+  }
+});
+
 // Route: Google Direct Login
 app.post('/api/auth/google-login', async (req: Request, res: Response) => {
   try {

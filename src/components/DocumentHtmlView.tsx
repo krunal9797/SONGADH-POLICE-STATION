@@ -381,27 +381,27 @@ export const DocumentHtmlView: React.FC<Props> = ({
             <div className="flex flex-wrap items-center gap-2 text-xs">
               {Array.from(
                 new Map(
-                  doc.moneyTransferTrail.map((item) => {
-                    const layerNum = item.layer || 'Layer : 1';
-                    const isOther =
-                      item.destinationBank?.toLowerCase().includes('other') ||
-                      item.destinationBank?.toLowerCase().includes('npci') ||
-                      item.destinationBank?.toLowerCase().includes('upi') ||
-                      item.destinationAccountNo?.includes('@');
-                    const bank = isOther ? 'NPCI' : item.destinationBank || 'Bank';
-                    return [layerNum, `${layerNum} (${bank})`];
-                  })
+                  [...doc.moneyTransferTrail]
+                    .sort((a, b) => {
+                      const numA = parseInt((a.layer || '').replace(/\D/g, '') || '0', 10);
+                      const numB = parseInt((b.layer || '').replace(/\D/g, '') || '0', 10);
+                      return numA - numB;
+                    })
+                    .map((item) => {
+                      const layerNum = item.layer || 'Layer : 1';
+                      const isOther =
+                        item.destinationBank?.toLowerCase().includes('other') ||
+                        item.destinationBank?.toLowerCase().includes('npci') ||
+                        item.destinationBank?.toLowerCase().includes('upi') ||
+                        item.destinationAccountNo?.includes('@');
+                      const bank = isOther ? 'NPCI' : item.destinationBank || 'Bank';
+                      return [layerNum, `${layerNum} (${bank})`];
+                    })
                 ).values()
               ).map((label, idx) => (
                 <span
                   key={idx}
-                  className={`px-2.5 py-0.5 rounded font-semibold text-[11px] ${
-                    idx === 0
-                      ? 'bg-amber-100 text-amber-900 border border-amber-300'
-                      : idx === 1
-                      ? 'bg-rose-100 text-rose-900 border border-rose-300'
-                      : 'bg-emerald-100 text-emerald-900 border border-emerald-300'
-                  }`}
+                  className="px-2.5 py-0.5 rounded font-semibold text-[11px] bg-slate-100 text-slate-800 border border-slate-300"
                 >
                   {label}
                 </span>
@@ -425,24 +425,41 @@ export const DocumentHtmlView: React.FC<Props> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
-                {filteredMoneyTrail.map((item) => (
-                  <tr key={item.sNo} className="hover:bg-blue-50/30 transition">
-                    <td className="p-2.5 border-r border-slate-200 text-center font-semibold text-slate-500">{item.sNo}</td>
-                    <td className="p-2.5 border-r border-slate-200">
-                      <div className="font-mono font-bold text-slate-800">{item.senderAccountNo}</div>
-                      <div className="font-mono text-[10px] text-slate-500">{item.senderTxnOrUtr}</div>
-                    </td>
-                    <td className="p-2.5 border-r border-slate-200 text-center">
-                      <span className={`px-2 py-0.5 rounded text-[10.5px] font-bold ${
-                        item.layer.includes('1') 
-                          ? 'bg-amber-100 text-amber-800 border border-amber-300' 
-                          : item.layer.includes('2')
-                          ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                          : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                      }`}>
-                        {item.layer}
-                      </span>
-                    </td>
+                {filteredMoneyTrail.map((item) => {
+                  const layerNum = parseInt((item.layer || '').replace(/\D/g, '') || '1', 10);
+                  const badgeColor =
+                    layerNum === 1
+                      ? 'bg-amber-100 text-amber-900 border-amber-300'
+                      : layerNum === 2
+                      ? 'bg-rose-100 text-rose-900 border-rose-300'
+                      : layerNum === 3
+                      ? 'bg-purple-100 text-purple-900 border-purple-300'
+                      : layerNum === 4
+                      ? 'bg-blue-100 text-blue-900 border-blue-300'
+                      : layerNum === 5
+                      ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                      : layerNum === 6
+                      ? 'bg-indigo-100 text-indigo-900 border-indigo-300'
+                      : layerNum === 7
+                      ? 'bg-teal-100 text-teal-900 border-teal-300'
+                      : layerNum === 8
+                      ? 'bg-orange-100 text-orange-900 border-orange-300'
+                      : layerNum === 9
+                      ? 'bg-cyan-100 text-cyan-900 border-cyan-300'
+                      : 'bg-violet-100 text-violet-900 border-violet-300';
+
+                  return (
+                    <tr key={item.sNo} className="hover:bg-blue-50/30 transition">
+                      <td className="p-2.5 border-r border-slate-200 text-center font-semibold text-slate-500">{item.sNo}</td>
+                      <td className="p-2.5 border-r border-slate-200">
+                        <div className="font-mono font-bold text-slate-800">{item.senderAccountNo}</div>
+                        <div className="font-mono text-[10px] text-slate-500">{item.senderTxnOrUtr}</div>
+                      </td>
+                      <td className="p-2.5 border-r border-slate-200 text-center">
+                        <span className={`px-2 py-0.5 rounded text-[10.5px] font-bold border ${badgeColor}`}>
+                          {item.layer}
+                        </span>
+                      </td>
                     <td className="p-2.5 border-r border-slate-200">
                       <div className="font-bold text-slate-900 flex items-center gap-1">
                         <Building2 className="w-3.5 h-3.5 text-indigo-600" />
@@ -466,7 +483,8 @@ export const DocumentHtmlView: React.FC<Props> = ({
                       <div className="text-[10px] text-slate-400">{item.dateOfAction}</div>
                     </td>
                   </tr>
-                ))}
+                );
+              })}
               </tbody>
             </table>
           </div>

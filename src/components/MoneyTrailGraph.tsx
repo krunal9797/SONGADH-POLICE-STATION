@@ -20,34 +20,40 @@ export const MoneyTrailGraph: React.FC<Props> = ({ document: doc, language }) =>
       }
       groups[layerKey].push(item);
     });
-    return Object.entries(groups).map(([layerName, items]) => {
-      // Calculate total amount in this layer
-      const totalAmount = items.reduce((acc, curr) => {
-        const cleaned = parseFloat((curr.transactionAmount || '0').replace(/,/g, ''));
-        return isNaN(cleaned) ? acc : acc + cleaned;
-      }, 0);
+    return Object.entries(groups)
+      .sort(([a], [b]) => {
+        const numA = parseInt(a.replace(/\D/g, ''), 10) || 0;
+        const numB = parseInt(b.replace(/\D/g, ''), 10) || 0;
+        return numA - numB;
+      })
+      .map(([layerName, items]) => {
+        // Calculate total amount in this layer
+        const totalAmount = items.reduce((acc, curr) => {
+          const cleaned = parseFloat((curr.transactionAmount || '0').replace(/,/g, ''));
+          return isNaN(cleaned) ? acc : acc + cleaned;
+        }, 0);
 
-      // Distinct banks in this layer
-      const banks = Array.from(
-        new Set(
-          items.map((i) => {
-            const isOther =
-              i.destinationBank?.toLowerCase().includes('other') ||
-              i.destinationBank?.toLowerCase().includes('npci') ||
-              i.destinationBank?.toLowerCase().includes('upi') ||
-              i.destinationAccountNo?.includes('@');
-            return isOther ? 'NPCI' : i.destinationBank;
-          })
-        )
-      );
+        // Distinct banks in this layer
+        const banks = Array.from(
+          new Set(
+            items.map((i) => {
+              const isOther =
+                i.destinationBank?.toLowerCase().includes('other') ||
+                i.destinationBank?.toLowerCase().includes('npci') ||
+                i.destinationBank?.toLowerCase().includes('upi') ||
+                i.destinationAccountNo?.includes('@');
+              return isOther ? 'NPCI' : i.destinationBank;
+            })
+          )
+        );
 
-      return {
-        layerName,
-        items,
-        totalAmount,
-        banks,
-      };
-    });
+        return {
+          layerName,
+          items,
+          totalAmount,
+          banks,
+        };
+      });
   }, [doc.moneyTransferTrail]);
 
   // Victim Account info

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { CyberCrimeDocument } from './data/sampleDocument';
 import { DocumentHtmlView } from './components/DocumentHtmlView';
 import { MoneyTrailGraph } from './components/MoneyTrailGraph';
@@ -38,6 +38,33 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const isGu = language === 'gu';
+
+  // Dynamic step message cycle during processing
+  useEffect(() => {
+    if (!isProcessing) return;
+    const stepsGu = [
+      'PDF ફાઇલ વાંચી રહ્યું છે...',
+      'પેજ 1, 2, 3, 4, 5+ તમામ પૃષ્ઠો સ્કેન થઈ રહ્યાં છે...',
+      'Money Transfer Trail (લેયર 1 થી 15+ સુધી) એક્સ્ટ્રેક્ટ થઈ રહ્યું છે...',
+      'બેંક નામ, ખાતા નંબર, IFSC અને લીયન રકમ વેરિફિકેશન...',
+      'ડિજિટલ HTML દસ્તાવેજ અને બેંક નોટિસ ફોર્મેટ તૈયાર થઈ રહ્યું છે...',
+    ];
+    const stepsEn = [
+      'Reading and analyzing PDF document...',
+      'Scanning text & tables across pages 1, 2, 3, 4, 5+...',
+      'Extracting full Money Transfer Trail (Layer 1 to 15+)...',
+      'Validating Bank names, Account numbers & Lien amounts...',
+      'Constructing digital HTML document & Notice templates...',
+    ];
+    const steps = isGu ? stepsGu : stepsEn;
+    let index = 0;
+    setOcrStep(steps[0]);
+    const timer = setInterval(() => {
+      index = (index + 1) % steps.length;
+      setOcrStep(steps[index]);
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [isProcessing, isGu]);
 
   const handleReset = () => {
     // Reset state as explicitly requested by user: "hu upload akris pdf and reset b ok"
@@ -245,7 +272,7 @@ export default function App() {
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-base font-bold text-white tracking-tight">
-                    {isGu ? 'PDF થી HTML/CSS રૂપાંતરણ અને OCR વ્યુઅર' : 'PDF to HTML/CSS OCR Viewer'}
+                    Er. Krunal Gamit
                   </h1>
                   <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-semibold px-2 py-0.5 rounded-full border border-emerald-400/30">
                     Gemini 3.1 Flash Lite
@@ -434,23 +461,89 @@ export default function App() {
           </div>
         )}
 
-        {/* OCR Processing Progress Overlay */}
+        {/* Centered Animated Process Dialogue Modal */}
         {isProcessing && (
-          <div className="bg-blue-50 border-2 border-blue-400/80 rounded-2xl p-6 text-center space-y-4 shadow-md no-print">
-            <div className="flex justify-center">
-              <div className="relative">
-                <Loader2 className="w-10 h-10 text-blue-600 animate-spin" />
-                <Sparkles className="w-4 h-4 text-amber-500 absolute -top-1 -right-1 animate-pulse" />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md animate-fade-in no-print">
+            <div className="relative max-w-md w-full bg-white rounded-3xl shadow-2xl border border-slate-200 p-6 sm:p-8 text-center overflow-hidden">
+              {/* Decorative Ambient Background Glows */}
+              <div className="absolute -top-24 -left-24 w-48 h-48 bg-blue-500/15 rounded-full blur-3xl pointer-events-none" />
+              <div className="absolute -bottom-24 -right-24 w-48 h-48 bg-indigo-500/15 rounded-full blur-3xl pointer-events-none" />
+
+              {/* Author & Engine Badge */}
+              <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-semibold mb-5">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                </span>
+                <span>Er. Krunal Gamit • AI OCR Engine</span>
               </div>
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-blue-950">
+
+              {/* Scanner Central Animation */}
+              <div className="relative mx-auto w-24 h-24 mb-5 flex items-center justify-center">
+                {/* Outer rotating dashed ring */}
+                <div className="absolute inset-0 rounded-full border-4 border-dashed border-blue-400/40 animate-[spin_10s_linear_infinite]" />
+                
+                {/* Middle spinning gradient ring */}
+                <div className="absolute inset-1.5 rounded-full border-3 border-transparent border-t-blue-600 border-r-indigo-500 animate-spin" />
+                
+                {/* Inner glowing pulse circle */}
+                <div className="absolute inset-3 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-blue-500/30">
+                  <FileText className="w-9 h-9" />
+                </div>
+
+                {/* Laser scanning beam line */}
+                <div className="absolute inset-x-2 h-1 bg-gradient-to-r from-transparent via-cyan-300 to-transparent shadow-[0_0_10px_#38bdf8] animate-pulse pointer-events-none" />
+                
+                {/* Floating sparkle badge */}
+                <div className="absolute -top-1 -right-1 bg-amber-400 text-amber-950 p-1.5 rounded-full shadow-sm">
+                  <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                </div>
+              </div>
+
+              {/* Title */}
+              <h3 className="text-lg sm:text-xl font-bold text-slate-900 mb-2">
                 {isGu ? 'PDF દસ્તાવેજ પ્રોસેસિંગ ચાલુ છે...' : 'Processing PDF Document...'}
               </h3>
-              <p className="text-xs font-medium text-blue-700 mt-1">{ocrStep}</p>
-            </div>
-            <div className="w-full max-w-md mx-auto bg-blue-200/60 h-2 rounded-full overflow-hidden">
-              <div className="bg-blue-600 h-full w-2/3 animate-pulse rounded-full" />
+
+              {/* Dynamic Animated Status Step Pill */}
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-50 text-blue-800 rounded-full text-xs font-semibold border border-blue-200/80 mb-5 max-w-full shadow-xs">
+                <Loader2 className="w-3.5 h-3.5 text-blue-600 animate-spin shrink-0" />
+                <span className="truncate">{ocrStep}</span>
+              </div>
+
+              {/* Animated Progress Bar */}
+              <div className="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden mb-6 border border-slate-200 relative">
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-600 via-indigo-500 to-cyan-500 rounded-full animate-pulse w-full" />
+              </div>
+
+              {/* Live Extraction Stages Checklist */}
+              <div className="text-left bg-slate-50 rounded-2xl p-4 border border-slate-200/80 space-y-2.5 text-xs text-slate-700">
+                <div className="flex items-center gap-2 font-medium">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                  <span>{isGu ? 'પેજ 1, 2, 3, 4, 5+ તમામ પૃષ્ઠોનું સ્કેનિંગ' : 'Scanning across all pages (Pages 1-5+)'}</span>
+                </div>
+                <div className="flex items-center gap-2 font-medium">
+                  <Workflow className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <span>
+                    {isGu ? 'મની ટ્રાન્સફર ટ્રેઇલ (લેયર 1 થી 15+ સુધી)' : 'Full Money Transfer Trail (Layer 1 to 15+)'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 font-medium">
+                  <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                  <span>{isGu ? 'બેંક નામ, ખાતા નંબર & લિયન રકમ વેરિફિકેશન' : 'Bank names, A/C & Lien amount verification'}</span>
+                </div>
+                <div className="flex items-center gap-2 font-medium">
+                  <FileCheck2 className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>{isGu ? 'ડિજિટલ HTML વ્યૂ અને બેંક નોટિસ તૈયાર થશે' : 'Building digital HTML & Bank notice letter'}</span>
+                </div>
+              </div>
+
+              {/* Information Footnote */}
+              <p className="text-[11px] text-slate-500 mt-4 leading-relaxed">
+                {isGu
+                  ? 'ℹ️ 10 થી 15 લેયર વાળા મોટા રિપોર્ટ માટે ડેટા મેળવવામાં થોડી સેકન્ડ્સ લાગી શકે છે...'
+                  : 'ℹ️ For large documents with 10-15 layers, extraction takes a few seconds to verify all records...'}
+              </p>
             </div>
           </div>
         )}
@@ -580,15 +673,28 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-slate-900 text-slate-400 text-xs py-6 border-t border-slate-800 mt-auto no-print">
+      <footer className="bg-slate-900 text-slate-400 text-xs py-5 border-t border-slate-800 mt-auto no-print">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div>
-            <span className="font-semibold text-slate-300">PDF to HTML/CSS OCR Document Engine</span> • {isGu ? 'સંપૂર્ણ ડેટા એક્સ્ટ્રેક્શન અને દસ્તાવેજ વ્યૂઅર' : 'High-fidelity document extraction & rendering'}
+          <div className="flex flex-col sm:flex-row items-center gap-1.5 sm:gap-3 text-center sm:text-left">
+            <span className="font-semibold text-slate-200 tracking-wide">Design and Develop by Er. Krunal Gamit</span>
+            <span className="hidden sm:inline text-slate-600">•</span>
+            <span className="text-slate-300">
+              Helpline no:{' '}
+              <a
+                href="https://wa.me/917043311587"
+                target="_blank"
+                rel="noreferrer"
+                className="text-emerald-400 font-mono font-bold hover:underline hover:text-emerald-300 transition-colors"
+              >
+                +917043311587
+              </a>{' '}
+              <span className="text-slate-400 font-medium">(whatsapp only)</span>
+            </span>
           </div>
-          <div className="flex items-center gap-4 text-slate-500">
-            <span>Gujarati &amp; English Support</span>
+          <div className="flex items-center gap-3 text-slate-500">
+            <span>Gujarati &amp; English</span>
             <span>•</span>
-            <span>1930 Cyber Crime Format</span>
+            <span>1930 Cyber Crime Engine</span>
           </div>
         </div>
       </footer>

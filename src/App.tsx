@@ -6,6 +6,7 @@ import { OriginalPdfViewer } from './components/OriginalPdfViewer';
 import { RawDataViewer } from './components/RawDataViewer';
 import { KycLetterGenerator } from './components/KycLetterGenerator';
 import { BankVerificationLetterGenerator } from './components/BankVerificationLetterGenerator';
+import { LoginPage, UserSession } from './components/LoginPage';
 import {
   Upload,
   RotateCcw,
@@ -21,9 +22,24 @@ import {
   Sparkles,
   FileCheck2,
   Building2,
+  LogOut,
+  UserCheck,
 } from 'lucide-react';
 
 export default function App() {
+  // Session Authentication State (Gatekeeper requested by user: gamitkrunal7997@gmail.com)
+  const [userSession, setUserSession] = useState<UserSession | null>(() => {
+    try {
+      const saved = sessionStorage.getItem('gujarat_police_user');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [authToken, setAuthToken] = useState<string | null>(() => {
+    return sessionStorage.getItem('gujarat_police_token') || null;
+  });
+
   const [currentDoc, setCurrentDoc] = useState<CyberCrimeDocument | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
@@ -38,6 +54,23 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const isGu = language === 'gu';
+
+  // Logout handler
+  const handleLogout = async () => {
+    try {
+      if (authToken) {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+      }
+    } catch (_) {}
+    sessionStorage.removeItem('gujarat_police_token');
+    sessionStorage.removeItem('gujarat_police_user');
+    setUserSession(null);
+    setAuthToken(null);
+    setCurrentDoc(null);
+  };
 
   // Dynamic step message cycle during processing
   useEffect(() => {
@@ -110,6 +143,7 @@ export default function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         },
         body: JSON.stringify({
           pdfBase64: base64Data,
@@ -258,6 +292,18 @@ export default function App() {
     window.print();
   };
 
+  // GATEKEEPER: If not authenticated, render Login Page first as requested by user
+  if (!userSession || !authToken) {
+    return (
+      <LoginPage
+        onLoginSuccess={(user, token) => {
+          setUserSession(user);
+          setAuthToken(token);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col font-sans">
       {/* Top Navigation Bar */}
@@ -346,6 +392,28 @@ export default function App() {
                   <span>{isGu ? 'પ્રિન્ટ' : 'Print'}</span>
                 </button>
               )}
+
+              {/* Officer Profile Badge & Logout Button */}
+              <div className="flex items-center gap-2 pl-2 border-l border-slate-700">
+                <div className="hidden lg:flex flex-col text-right">
+                  <span className="text-xs font-bold text-slate-200 flex items-center justify-end gap-1">
+                    <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
+                    {userSession?.name || 'Er. Krunal Gamit'}
+                  </span>
+                  <span className="text-[10px] text-slate-400 truncate max-w-[140px]">
+                    {userSession?.email || 'gamitkrunal7997@gmail.com'}
+                  </span>
+                </div>
+
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center gap-1 text-xs bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-800/60 px-3 py-1.5 rounded-lg font-semibold transition"
+                  title={isGu ? 'લૉગ આઉટ કરો' : 'Logout from portal'}
+                >
+                  <LogOut className="w-3.5 h-3.5 text-rose-400" />
+                  <span>{isGu ? 'લૉગ આઉટ' : 'Logout'}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

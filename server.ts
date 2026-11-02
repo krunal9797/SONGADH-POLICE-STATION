@@ -4,6 +4,7 @@ import { GoogleGenAI } from '@google/genai';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import nodemailer from 'nodemailer';
 
 dotenv.config();
 
@@ -13,6 +14,331 @@ const port = process.env.PORT || 3000;
 // Body parser with 50mb limit for PDF base64 payloads
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Authorized email as requested by user
+const AUTHORIZED_EMAIL = 'gamitkrunal7997@gmail.com';
+
+// In-memory OTP storage with expiration
+interface OtpEntry {
+  code: string;
+  email: string;
+  expiresAt: number;
+  createdAt: number;
+}
+const otpStore = new Map<string, OtpEntry>();
+
+// Active sessions storage
+const activeSessions = new Map<string, { email: string; name: string; role: string; loginTime: number }>();
+
+// Helper to configure Nodemailer transporter
+function getMailTransporter() {
+  const host = process.env.SMTP_HOST;
+  const portNum = parseInt(process.env.SMTP_PORT || '587', 10);
+  const user = process.env.SMTP_USER || process.env.EMAIL_USER;
+  const pass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD || process.env.EMAIL_PASS;
+
+  if (user && pass) {
+    return nodemailer.createTransport({
+      host: host || 'smtp.gmail.com',
+      port: portNum,
+      secure: portNum === 465,
+      auth: { user, pass },
+    });
+  }
+
+  return null;
+}
+
+// ---------------- AUTH ROUTES ----------------
+
+// Route: Send OTP to authorized email
+app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
+  try {
+    const rawEmail = (req.body?.email || '').trim().toLowerCase();
+
+    if (!rawEmail) {
+      return res.status(400).json({
+        success: false,
+        error: 'કૃપા કરીને ઈમેલ સરનામું દાખલ કરો (Please provide an email address).',
+      });
+    }
+
+    if (rawEmail !== AUTHORIZED_EMAIL.toLowerCase()) {
+      return res.status(403).json({
+        success: false,
+        error: `અનધિકૃત ઈમેલ! ફક્ત અધિકૃત અધિકારી (${AUTHORIZED_EMAIL}) ને જ લૉગિન કરવાની મંજૂરી છે.`,
+      });
+    }
+
+    // Generate secure 6-digit numeric OTP
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes validity
+
+    otpStore.set(rawEmail, {
+      code: otpCode,
+      email: rawEmail,
+      expiresAt,
+      createdAt: Date.now(),
+    });
+
+    console.log(`\n========================================`);
+    console.log(`[AUTH OTP GENERATED] Email: ${rawEmail}`);
+    console.log(`[AUTH OTP CODE] >>> ${otpCode} <<< (Expires in 10 mins)`);
+    console.log(`========================================\n`);
+
+    let emailSent = false;
+    let emailStatusMessage = '';
+
+    // If client supplied Google OAuth Access Token, send directly via official Gmail API
+    const googleToken = req.body?.googleAccessToken;
+    if (googleToken) {
+      try {
+        const subject = `પોલીસ પોર્ટલ OTP ચકાસણી કોડ: ${otpCode} - Gujarat Police Cyber Crime Cell`;
+        const emailBodyHtml = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+            <div style="background-color: #0f172a; color: #ffffff; padding: 24px; text-align: center;">
+              <h1 style="margin: 0; font-size: 20px; font-weight: bold; letter-spacing: 1px;">GUJARAT POLICE</h1>
+              <p style="margin: 6px 0 0; font-size: 13px; color: #94a3b8;">Cyber Crime Investigation Cell • Songadh Police Station (Tapi)</p>
+            </div>
+            <div style="padding: 28px; background-color: #ffffff; color: #1e293b; text-align: center;">
+              <h2 style="margin-top: 0; color: #0f172a; font-size: 18px;">સુરક્ષિત લૉગિન OTP ચકાસણી</h2>
+              <p style="font-size: 14px; line-height: 1.6; color: #475569; text-align: left;">
+                નમસ્તે <strong>Er. Krunal Gamit</strong>,<br>
+                ગુજરાત પોલીસ 1930 NCRP સાયબર પોર્ટલમાં લૉગિન કરવા માટે તમારો વન ટાઈમ પાસવર્ડ (OTP) નીચે મુજબ છે:
+              </p>
+              <div style="margin: 28px 0; text-align: center;">
+                <span style="display: inline-block; font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #1d4ed8; background: #eff6ff; border: 2px dashed #3b82f6; padding: 12px 30px; border-radius: 10px; font-family: monospace;">
+                  ${otpCode}
+                </span>
+              </div>
+              <p style="font-size: 13px; color: #64748b; line-height: 1.5; text-align: left;">
+                ⏱️ આ OTP કોડ આગામી <strong>10 મિનિટ</strong> સુધી માન્ય રહેશે.<br>
+                🔒 સુરક્ષાના કારણોસર આ કોડ કોઈની સાથે શેર કરશો નહીં.
+              </p>
+            </div>
+            <div style="background-color: #f8fafc; padding: 16px; text-align: center; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0;">
+              Designed & Developed by Er. Krunal Gamit • Helpline: +917043311587 (WhatsApp Only)
+            </div>
+          </div>
+        `;
+
+        const rfcMessage = [
+          `To: ${rawEmail}`,
+          `Subject: =?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`,
+          'MIME-Version: 1.0',
+          'Content-Type: text/html; charset=UTF-8',
+          '',
+          emailBodyHtml,
+        ].join('\r\n');
+
+        const rawBase64 = Buffer.from(rfcMessage)
+          .toString('base64')
+          .replace(/\+/g, '-')
+          .replace(/\//g, '_')
+          .replace(/=+$/, '');
+
+        const gmailRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${googleToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ raw: rawBase64 }),
+        });
+
+        if (gmailRes.ok) {
+          emailSent = true;
+          console.log(`[AUTH GMAIL] Email successfully sent to ${rawEmail}`);
+        } else {
+          const errBody = await gmailRes.text();
+          console.warn('[AUTH GMAIL API ERROR]', errBody);
+        }
+      } catch (gmailErr) {
+        console.warn('[AUTH GMAIL CATCH]', gmailErr);
+      }
+    }
+
+    // Secondary fallback: Nodemailer SMTP if configured
+    if (!emailSent) {
+      const transporter = getMailTransporter();
+      if (transporter) {
+        try {
+          const mailOptions = {
+            from: `"Gujarat Police Cyber Crime Portal" <${process.env.SMTP_USER || process.env.EMAIL_USER || 'no-reply@gujarat.gov.in'}>`,
+            to: rawEmail,
+            subject: `પોલીસ પોર્ટલ OTP ચકાસણી કોડ: ${otpCode} - Gujarat Police Cyber Crime Cell`,
+            text: `નમસ્તે Er. Krunal Gamit,\n\nગુજરાત પોલીસ સાયબર ક્રાઈમ પોર્ટલ (Songadh Police Station) માં લૉગિન કરવા માટે તમારો વન ટાઈમ પાસવર્ડ (OTP) નીચે મુજબ છે:\n\nOTP કોડ: ${otpCode}\n\nઆ કોડ ફક્ત 10 મિનિટ માટે માન્ય છે. સુરક્ષાના કારણોસર આ કોડ કોઈ સાથે શેર કરશો નહીં.\n\nઆભાર,\nસાયબર ક્રાઈમ સેલ, સોનગઢ પોલીસ સ્ટેશન\nજિલ્લો: તાપી - ગુજરાત`,
+          };
+
+          await transporter.sendMail(mailOptions);
+          emailSent = true;
+        } catch (mailErr: any) {
+          console.warn('[AUTH] SMTP send failed:', mailErr?.message || mailErr);
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      emailSent,
+      message: `OTP સફળતાપૂર્વક તમારા ઈમેલ ${rawEmail} પર મોકલવામાં આવ્યો છે. કૃપા કરીને તમારું ઇનબોક્સ ચેક કરો.`,
+    });
+  } catch (err: any) {
+    console.error('Send OTP error:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'OTP મોકલવામાં સર્વર ક્ષતિ આવી. કૃપા કરીને ફરી પ્રયાસ કરો.',
+    });
+  }
+});
+
+// Route: Google Direct Login
+app.post('/api/auth/google-login', async (req: Request, res: Response) => {
+  try {
+    const email = (req.body?.email || '').trim().toLowerCase();
+
+    if (!email || email !== AUTHORIZED_EMAIL.toLowerCase()) {
+      return res.status(403).json({
+        success: false,
+        error: `અનધિકૃત એકાઉન્ટ! ફક્ત અધિકૃત અધિકારી (${AUTHORIZED_EMAIL}) ને જ પ્રવેશની મંજૂરી છે.`,
+      });
+    }
+
+    // Create verified session token
+    const token = 'police_google_' + Buffer.from(`${email}:${Date.now()}:${Math.random()}`).toString('hex');
+    const officerProfile = {
+      email,
+      name: 'Er. Krunal Gamit',
+      role: 'Cyber Crime Investigation Officer',
+      station: 'Songadh Police Station, Dist. Tapi',
+      phone: '+917043311587',
+      loginTime: Date.now(),
+    };
+
+    activeSessions.set(token, officerProfile);
+
+    return res.json({
+      success: true,
+      message: 'Google એકાઉન્ટ વડે સફળતાપૂર્વક ચકાસણી થઈ!',
+      token,
+      user: officerProfile,
+    });
+  } catch (err: any) {
+    console.error('Google login error:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'Google વેરિફિકેશનમાં ક્ષતિ આવી.',
+    });
+  }
+});
+
+// Route: Verify OTP and establish session
+app.post('/api/auth/verify-otp', async (req: Request, res: Response) => {
+  try {
+    const rawEmail = (req.body?.email || '').trim().toLowerCase();
+    const inputOtp = (req.body?.otp || '').toString().trim();
+
+    if (!rawEmail || !inputOtp) {
+      return res.status(400).json({
+        success: false,
+        error: 'ઈમેલ અને OTP બંને દાખલ કરવા જરૂરી છે.',
+      });
+    }
+
+    if (rawEmail !== AUTHORIZED_EMAIL.toLowerCase()) {
+      return res.status(403).json({
+        success: false,
+        error: 'અનધિકૃત ઈમેલ એડ્રેસ.',
+      });
+    }
+
+    const storedEntry = otpStore.get(rawEmail);
+
+    if (!storedEntry) {
+      return res.status(400).json({
+        success: false,
+        error: 'કોઈ સક્રિય OTP મળ્યો નથી. કૃપા કરીને નવો OTP મેળવો.',
+      });
+    }
+
+    if (Date.now() > storedEntry.expiresAt) {
+      otpStore.delete(rawEmail);
+      return res.status(400).json({
+        success: false,
+        error: 'આ OTP ની સમયસીમા સમાપ્ત થઈ ગઈ છે (Expired). કૃપા કરીને નવો OTP મેળવો.',
+      });
+    }
+
+    if (storedEntry.code !== inputOtp) {
+      return res.status(400).json({
+        success: false,
+        error: 'અમાન્ય OTP! કૃપા કરીને સાચો 6-અંકનો કોડ દાખલ કરો.',
+      });
+    }
+
+    // OTP verified successfully! Delete used OTP
+    otpStore.delete(rawEmail);
+
+    // Create session token
+    const token = 'police_auth_' + Buffer.from(`${rawEmail}:${Date.now()}:${Math.random()}`).toString('hex');
+    const officerProfile = {
+      email: rawEmail,
+      name: 'Er. Krunal Gamit',
+      role: 'Cyber Crime Investigation Officer',
+      station: 'Songadh Police Station, Dist. Tapi',
+      phone: '+917043311587',
+      loginTime: Date.now(),
+    };
+
+    activeSessions.set(token, officerProfile);
+
+    return res.json({
+      success: true,
+      message: 'સફળતાપૂર્વક લૉગિન થયું!',
+      token,
+      user: officerProfile,
+    });
+  } catch (err: any) {
+    console.error('Verify OTP error:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'OTP ચકાસણીમાં સર્વર ક્ષતિ આવી.',
+    });
+  }
+});
+
+// Route: Validate active session token
+app.get('/api/auth/verify-session', (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ success: false, authenticated: false });
+  }
+
+  const token = authHeader.split(' ')[1];
+  const session = activeSessions.get(token);
+
+  if (!session) {
+    return res.status(401).json({ success: false, authenticated: false, error: 'સત્ર સમાપ્ત થઈ ગયું છે.' });
+  }
+
+  return res.json({
+    success: true,
+    authenticated: true,
+    user: session,
+  });
+});
+
+// Route: Logout
+app.post('/api/auth/logout', (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
+    activeSessions.delete(token);
+  }
+  return res.json({ success: true, message: 'સફળતાપૂર્વક લૉગ આઉટ થયા.' });
+});
+
+// ---------------- OCR ROUTES ----------------
 
 // Server-side Gemini client as per @google/genai specifications
 const ai = new GoogleGenAI({

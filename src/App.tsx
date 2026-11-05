@@ -130,19 +130,67 @@ export default function App() {
     try {
       setOcrStep(
         isGu
-          ? 'હાઇ-સ્પીડ ડિજિટલ એન્જિન વડે તમામ પૃષ્ઠો (૧ થી ૧૦૦+ પાના) પ્રોસેસ થઈ રહ્યાં છે...'
-          : 'High-speed digital engine processing all pages (1 to 100+ pages)...'
+          ? 'હાઇ-સ્પીડ ડિજિટલ એન્જિન વડે પૃષ્ઠોનું વિશ્લેષણ થઈ રહ્યું છે...'
+          : 'High-speed digital engine analyzing PDF pages...'
       );
 
-      // Convert file to base64
-      const reader = new FileReader();
-      const base64Promise = new Promise<string>((resolve, reject) => {
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-      });
-      reader.readAsDataURL(file);
+      // 1. In-browser client extraction first: 0ms network latency, no 4.5MB Vercel serverless payload limit
+      let clientExtractedDoc: CyberCrimeDocument | null = null;
+      let clientDigitalText = '';
+      let clientPageItems: { num: number; text: string }[] = [];
+      let clientTotalPages = 1;
 
-      const base64Data = await base64Promise;
+      try {
+        const clientResult = await extractTextFromPdfInBrowser(file);
+        if (clientResult && clientResult.hasDigitalText) {
+          clientDigitalText = clientResult.fullText;
+          clientPageItems = clientResult.pages;
+          clientTotalPages = clientResult.totalPages;
+          if (clientResult.parsedDoc) {
+            clientExtractedDoc = clientResult.parsedDoc;
+          }
+        }
+      } catch (browserErr) {
+        console.warn('[Browser PDF] In-browser extraction note:', browserErr);
+      }
+
+      // If client-side deterministic extraction extracted valid NCRP data, render immediately
+      const hasValidClientDoc =
+        clientExtractedDoc &&
+        (clientExtractedDoc.moneyTransferTrail.length > 0 ||
+          clientExtractedDoc.transactionsPutOnHold.length > 0 ||
+          clientExtractedDoc.victimAccountTransactions.length > 0 ||
+          (clientExtractedDoc.acknowledgement.acknowledgementNo && clientExtractedDoc.complainant.name));
+
+      if (hasValidClientDoc && clientExtractedDoc) {
+        console.log('[App] Client-side extraction succeeded with 0 network latency!');
+        setOcrStep(
+          isGu
+            ? `સંપૂર્ણ ડેટા સફળતાપૂર્વક મેળવાયો (${clientTotalPages} પૃષ્ઠો, ${clientExtractedDoc.moneyTransferTrail.length} ટ્રેઇલ રો, ${clientExtractedDoc.transactionsPutOnHold.length} હોલ્ડ વ્યવહારો).`
+            : `Extracted ${clientTotalPages} pages, ${clientExtractedDoc.moneyTransferTrail.length} trail rows, ${clientExtractedDoc.transactionsPutOnHold.length} holds.`
+        );
+        setCurrentDoc(clientExtractedDoc);
+        setIsProcessing(false);
+        return;
+      }
+
+      // 2. Server API fallback (for scanned PDFs or server-side verification)
+      setOcrStep(
+        isGu
+          ? 'સર્વર એન્જિન વડે ડેટા પ્રોસેસ થઈ રહ્યો છે...'
+          : 'Processing via server OCR engine...'
+      );
+
+      let base64Data = '';
+      if (!clientDigitalText) {
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+        });
+        reader.readAsDataURL(file);
+        base64Data = await base64Promise;
+      }
 
       const response = await fetch('/api/ocr-pdf', {
         method: 'POST',
@@ -151,7 +199,8 @@ export default function App() {
           ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         },
         body: JSON.stringify({
-          pdfBase64: base64Data,
+          ...(base64Data ? { pdfBase64: base64Data } : {}),
+          ...(clientDigitalText ? { digitalText: clientDigitalText, pageItems: clientPageItems, totalPages: clientTotalPages } : {}),
           filename: file.name,
         }),
       });
@@ -164,6 +213,12 @@ export default function App() {
         result = JSON.parse(rawText);
       } catch (jsonErr) {
         console.error('Failed to parse server response as JSON:', rawText);
+        if (clientExtractedDoc) {
+          console.log('[App] Server returned non-JSON, falling back to client-extracted doc.');
+          setCurrentDoc(clientExtractedDoc);
+          setIsProcessing(false);
+          return;
+        }
         throw new Error(
           isGu
             ? `સર્વર તરફથી અમાન્ય પ્રતિસાદ મળ્યો (Status ${response.status}).`
@@ -172,6 +227,12 @@ export default function App() {
       }
 
       if (!response.ok) {
+        if (clientExtractedDoc) {
+          console.log('[App] Server returned error status, falling back to client-extracted doc.');
+          setCurrentDoc(clientExtractedDoc);
+          setIsProcessing(false);
+          return;
+        }
         let errStr = result.error || `Server OCR processing failed with status ${response.status}`;
         try {
           const parsed = JSON.parse(errStr);

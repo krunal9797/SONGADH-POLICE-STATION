@@ -92,12 +92,6 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'No PDF or digital text provided.' });
     }
 
-    if (!process.env.GEMINI_API_KEY) {
-      return res.status(500).json({
-        error: 'GEMINI_API_KEY is not configured in environment variables.',
-      });
-    }
-
     // Clean base64 if provided
     const cleanBase64 = pdfBase64 ? pdfBase64.replace(/^data:application\/pdf;base64,/, '') : '';
 
@@ -266,12 +260,21 @@ Return ONLY a JSON object with this exact structure:
     if (!digitalText && cleanBase64) {
       const pdfBuffer = Buffer.from(cleanBase64, 'base64');
       try {
-        const u8Data = new Uint8Array(pdfBuffer.buffer, pdfBuffer.byteOffset, pdfBuffer.byteLength);
+        const u8Data = new Uint8Array(
+          pdfBuffer.buffer.slice(pdfBuffer.byteOffset, pdfBuffer.byteOffset + pdfBuffer.byteLength)
+        );
         const parser = new PDFParse(u8Data);
         const parseResult = await parser.getText();
         digitalText = (parseResult && parseResult.text) || '';
         pageItems = (parseResult && parseResult.pages) || [];
-      } catch (_) {}
+      } catch (e1) {
+        try {
+          const parser = new PDFParse(new Uint8Array(pdfBuffer));
+          const parseResult = await parser.getText();
+          digitalText = (parseResult && parseResult.text) || '';
+          pageItems = (parseResult && parseResult.pages) || [];
+        } catch (_) {}
+      }
     }
 
     const hasDigitalText = digitalText.trim().length > 80;
@@ -281,32 +284,46 @@ Return ONLY a JSON object with this exact structure:
       const deterministicDoc = extractNcrpFromDigitalText(digitalText, pageItems);
       finalDoc = deterministicDoc;
 
-      try {
-        const textSample = digitalText.slice(0, 60000);
-        const response = await callGeminiWithFallback(
-          [
+      if (process.env.GEMINI_API_KEY) {
+        try {
+          const textSample = digitalText.slice(0, 50000);
+          const response = await callGeminiWithFallback(
+            [
+              {
+                text: `Extract all fields and tables from this Indian Cyber Crime Reporting Portal (1930 / NCRP) document into JSON. Extract every row of the Money Transfer Trail (Layer 1 to 15+), exact Destination Bank names, exact Account numbers, exact IFSC codes, holds, and ATM withdrawals without skipping rows:\n\n${textSample}`,
+              },
+            ],
             {
-              text: `Extract all fields and tables from this Indian Cyber Crime Reporting Portal (1930 / NCRP) document into JSON. Extract every row of the Money Transfer Trail (Layer 1 to 15+), exact Destination Bank names, exact Account numbers, exact IFSC codes, holds, and ATM withdrawals without skipping rows:\n\n${textSample}`,
-            },
-          ],
-          {
-            systemInstruction: systemPrompt,
-            responseMimeType: 'application/json',
-            maxOutputTokens: 65536,
+              systemInstruction: systemPrompt,
+              responseMimeType: 'application/json',
+              maxOutputTokens: 65536,
+            }
+          );
+          const aiDoc = JSON.parse(response.text || '{}');
+          if (aiDoc) {
+            finalDoc = { ...deterministicDoc, ...aiDoc };
+            if ((!aiDoc.moneyTransferTrail || aiDoc.moneyTransferTrail.length === 0) && deterministicDoc.moneyTransferTrail.length > 0) {
+              finalDoc.moneyTransferTrail = deterministicDoc.moneyTransferTrail;
+            }
           }
-        );
-        const aiDoc = JSON.parse(response.text || '{}');
-        if (aiDoc) {
-          finalDoc = { ...deterministicDoc, ...aiDoc };
-          if ((!aiDoc.moneyTransferTrail || aiDoc.moneyTransferTrail.length === 0) && deterministicDoc.moneyTransferTrail.length > 0) {
-            finalDoc.moneyTransferTrail = deterministicDoc.moneyTransferTrail;
-          }
+        } catch (e) {
+          console.warn('Vercel Gemini metadata note:', e);
+          finalDoc = deterministicDoc;
         }
-      } catch (e) {
-        console.warn('Vercel Gemini metadata note:', e);
-        finalDoc = deterministicDoc;
       }
+
+      return res.status(200).json({
+        success: true,
+        data: finalDoc,
+      });
     } else {
+      if (!process.env.GEMINI_API_KEY) {
+        return res.status(400).json({
+          error:
+            'આ સ્કેન કરેલ ઈમેજ PDF છે. સ્કેન દસ્તાવેજો માટે Vercel Environment Variables માં GEMINI_API_KEY ઉમેરવો જરૂરી છે. ડિજિટલ PDF સીધા કોઈપણ કી વિના પ્રોસેસ થાય છે.',
+        });
+      }
+
       const response = await callGeminiWithFallback(
         [
           {

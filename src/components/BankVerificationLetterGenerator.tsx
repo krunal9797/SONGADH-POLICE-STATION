@@ -664,7 +664,7 @@ ${officerPhone}`;
                             {target.accountHolderName || '-'}
                           </td>
                           <td className="border border-slate-900 p-1.5 print:p-1 font-bold font-mono">
-                            {target.holdAmount}
+                           
                           </td>
                           <td className="border border-slate-900 p-1.5 print:p-1"></td>
                           <td className="border border-slate-900 p-1.5 print:p-1 font-semibold">Freeze / Lien</td>

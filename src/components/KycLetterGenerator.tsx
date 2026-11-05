@@ -19,6 +19,7 @@ import {
   MapPin,
 } from 'lucide-react';
 import { computeOutwardNo } from './BankVerificationLetterGenerator';
+import { resolveEntityOrBank, getEntitySuggestions } from '../utils/entityResolver';
 
 interface Props {
   document: CyberCrimeDocument;
@@ -71,6 +72,11 @@ export const KycLetterGenerator: React.FC<Props> = ({ document: doc, language, o
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedBankId, setSelectedBankId] = useState<string>('all');
+  const [customBankNames, setCustomBankNames] = useState<Record<string, string>>({});
+
+  const getEffectiveBankName = (target: KycLetterTarget) => {
+    return customBankNames[target.id] !== undefined ? customBankNames[target.id] : target.bankName;
+  };
 
   // Extract unique banks and accounts from the actual money transfer trail
   const letterTargets: KycLetterTarget[] = useMemo(() => {
@@ -84,18 +90,11 @@ export const KycLetterGenerator: React.FC<Props> = ({ document: doc, language, o
       const remarksRaw = (trail.referenceNoRemarks || '').trim();
       const utrRaw = (trail.transactionIdUtr || '').trim();
 
-      // Check if this belongs to NPCI:
-      // If bank name is 'Other', contains 'other', 'npci', 'upi', or if account/remarks is a UPI VPA (contains '@')
-      const isOtherOrNpci =
-        bankNameRaw.toLowerCase() === 'other' ||
-        bankNameRaw.toLowerCase().includes('other') ||
-        bankNameRaw.toLowerCase().includes('npci') ||
-        bankNameRaw.toLowerCase().includes('upi') ||
-        accountNoRaw.includes('@') ||
-        remarksRaw.toLowerCase().includes('upi') ||
-        remarksRaw.includes('@');
-
-      const resolvedBankName = isOtherOrNpci ? 'NPCI' : bankNameRaw;
+      const resolvedBankName = resolveEntityOrBank(
+        bankNameRaw,
+        accountNoRaw,
+        remarksRaw || utrRaw
+      );
       if (!resolvedBankName) return;
 
       const key = `${resolvedBankName}-${accountNoRaw || utrRaw}`;
@@ -105,7 +104,7 @@ export const KycLetterGenerator: React.FC<Props> = ({ document: doc, language, o
           id: `target-${idx + 1}`,
           bankName: resolvedBankName,
           accountNumber: accountNoRaw || '-',
-          ifscCode: isOtherOrNpci ? (trail.destinationIfsc !== '-' ? trail.destinationIfsc : '') : (trail.destinationIfsc || '-'),
+          ifscCode: trail.destinationIfsc !== '-' ? (trail.destinationIfsc || '') : '',
           accountHolderName: '',
           transactionId: utrRaw || '-',
           layer: trail.layer || `Layer : ${idx + 1}`,
@@ -129,6 +128,7 @@ export const KycLetterGenerator: React.FC<Props> = ({ document: doc, language, o
 
   const handleCopyText = (target: KycLetterTarget) => {
     const targetOutwardNo = getTargetOutwardNo(target.id);
+    const effectiveBank = getEffectiveBankName(target);
     const text = `${policeStation}
 ${district}
 Mobile No : ${officerPhone || '+916359626151'}
@@ -140,7 +140,7 @@ Date-${letterDate}
 
 To,
 Nodal officer/The Manager
-${target.bankName}
+${effectiveBank}
 
 Subject: Request for KYC and Transaction Details of Fraudulent Account
 
@@ -405,7 +405,7 @@ ${officerPhone}`;
                     : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
                 }`}
               >
-                <span>{t.bankName}</span>
+                <span>{getEffectiveBankName(t)}</span>
                 <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-black/10">
                   #{tOutward}
                 </span>
@@ -499,7 +499,43 @@ ${officerPhone}`;
                 <div className="text-xs leading-relaxed text-slate-950 mb-4 font-sans">
                   <div className="font-bold">To,</div>
                   <div className="font-bold">Nodal officer/The Manager</div>
-                  <div className="font-bold text-sm text-slate-900">{target.bankName}</div>
+                  <div className="mt-0.5">
+                    <input
+                      type="text"
+                      value={getEffectiveBankName(target)}
+                      onChange={(e) =>
+                        setCustomBankNames((prev) => ({
+                          ...prev,
+                          [target.id]: e.target.value,
+                        }))
+                      }
+                      className="font-bold text-sm text-slate-900 bg-transparent hover:bg-slate-100/80 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded px-1.5 py-0.5 -ml-1.5 border border-transparent hover:border-slate-300 focus:border-blue-500 transition-colors w-full max-w-xl print:border-none print:p-0 print:m-0 print:bg-transparent"
+                      title="ક્લિક કરીને બેંક અથવા પ્લેટફોર્મનું નામ બદલો (Click to edit recipient name)"
+                    />
+                  </div>
+                  {/* Quick Suggestions (no-print) */}
+                  <div className="flex flex-wrap items-center gap-1.5 mt-1 no-print">
+                    <span className="text-[10px] text-slate-400 font-medium">ઝડપી બદલો:</span>
+                    {getEntitySuggestions(target.bankName, target.accountNumber).slice(0, 4).map((sug, sIdx) => (
+                      <button
+                        key={sIdx}
+                        type="button"
+                        onClick={() =>
+                          setCustomBankNames((prev) => ({
+                            ...prev,
+                            [target.id]: sug,
+                          }))
+                        }
+                        className={`text-[10px] px-2 py-0.5 rounded-full border transition-all cursor-pointer ${
+                          getEffectiveBankName(target) === sug
+                            ? 'bg-blue-600 text-white border-blue-600 font-bold shadow-xs'
+                            : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300'
+                        }`}
+                      >
+                        {sug.length > 32 ? sug.split('(')[0].trim() || sug.substring(0, 32) : sug}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 {/* Subject Line */}

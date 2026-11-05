@@ -1,15 +1,17 @@
-import * as pdfjsLib from 'pdfjs-dist';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { CyberCrimeDocument } from '../data/sampleDocument';
 import { extractNcrpFromDigitalText } from './ncrpParser';
 
-// Configure same-origin PDF.js worker via Vite bundling
-try {
-  if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+// Configure PDF.js worker with Vite bundling and CDN fallback
+if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
+  try {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      pdfjsWorker ||
+      `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '4.10.38'}/pdf.worker.min.mjs`;
+  } catch (e) {
+    console.warn('PDF.js worker setup note:', e);
   }
-} catch (e) {
-  console.warn('PDF.js worker setup note:', e);
 }
 
 export interface ExtractedClientPdf {
@@ -23,20 +25,51 @@ export interface ExtractedClientPdf {
 /**
  * Extracts all text and page content directly in the browser preserving
  * line-by-line reading order and tabular column alignment using (x, y) coordinates.
- * This guarantees table cells on the same row stay on the same line,
- * separated by '|', allowing 100% accurate bank, account, and IFSC extraction.
+ * Multi-tier fallback ensures it works on Vercel, localhost, and restricted corporate networks.
  */
 export async function extractTextFromPdfInBrowser(file: File): Promise<ExtractedClientPdf> {
   const arrayBuffer = await file.arrayBuffer();
+  let pdf: any = null;
 
-  const loadingTask = pdfjsLib.getDocument({
-    data: new Uint8Array(arrayBuffer),
-    useSystemFonts: true,
-    disableRange: true,
-    disableStream: true,
-  });
+  try {
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(arrayBuffer),
+      useSystemFonts: true,
+      disableRange: true,
+      disableStream: true,
+      isEvalSupported: false,
+    });
+    pdf = await loadingTask.promise;
+  } catch (err1) {
+    console.warn('[PDF.js] Primary worker note, falling back to CDN worker:', err1);
+    try {
+      if (pdfjsLib.GlobalWorkerOptions) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '4.10.38'}/pdf.worker.min.mjs`;
+      }
+      const retryTask = pdfjsLib.getDocument({
+        data: new Uint8Array(arrayBuffer),
+        useSystemFonts: true,
+        disableRange: true,
+        disableStream: true,
+        isEvalSupported: false,
+      });
+      pdf = await retryTask.promise;
+    } catch (err2) {
+      console.warn('[PDF.js] CDN worker note, falling back to workerless mode:', err2);
+      if (pdfjsLib.GlobalWorkerOptions) {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '';
+      }
+      const fallbackTask = pdfjsLib.getDocument({
+        data: new Uint8Array(arrayBuffer),
+        useSystemFonts: true,
+        disableRange: true,
+        disableStream: true,
+        isEvalSupported: false,
+      });
+      pdf = await fallbackTask.promise;
+    }
+  }
 
-  const pdf = await loadingTask.promise;
   const totalPages = pdf.numPages;
   const pages: { num: number; text: string }[] = [];
   let fullText = '';

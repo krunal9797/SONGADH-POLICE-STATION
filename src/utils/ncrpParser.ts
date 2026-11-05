@@ -484,7 +484,17 @@ export function extractNcrpFromDigitalText(
   }
 
   // ---------------- 8. TRANSACTIONS PUT ON HOLD TABLE ----------------
-  const holdStart = cleanFullText.search(/Transaction\s*put\s*on\s*hold\s*\n\s*S\s*No\./i);
+  const holdTableMatches = Array.from(cleanFullText.matchAll(/Transactions?\s*put\s*on\s*hold/gi));
+  let tableMatch = null;
+  for (const m of holdTableMatches) {
+    const after = cleanFullText.slice(m.index, m.index + 300);
+    if (/S\s*No|put\s*on\s*hold\s*Date|put\s*on\s*hold\s*Amount/i.test(after)) {
+      tableMatch = m;
+      break;
+    }
+  }
+
+  const holdStart = tableMatch ? tableMatch.index : -1;
   if (holdStart !== -1) {
     const endMatches = [
       'Aadhaar Enabled Payment System',
@@ -499,7 +509,7 @@ export function extractNcrpFromDigitalText(
       if (idx !== -1 && idx < holdEnd) holdEnd = idx;
     }
     const section = cleanFullText.slice(holdStart, holdEnd);
-    const rowMatches = Array.from(section.matchAll(/\n(\d+)\s*\t/g));
+    const rowMatches = Array.from(section.matchAll(/(?:^|\n|\t)(\d+)\s*\t/g));
 
     for (let i = 0; i < rowMatches.length; i++) {
       const cur = rowMatches[i];
@@ -523,9 +533,9 @@ export function extractNcrpFromDigitalText(
         );
         if (dateMatch) {
           actionDate = dateMatch[1].trim();
-          bank = bankPart.slice(0, dateMatch.index).replace(/[\n\r]+/g, ' ').trim();
+          bank = bankPart.slice(0, dateMatch.index).replace(/[\n\r\t]+/g, ' ').trim();
         } else {
-          bank = bankPart.replace(/[\n\r]+/g, ' ').trim();
+          bank = bankPart.replace(/[\n\r\t]+/g, ' ').trim();
         }
       }
 
@@ -537,7 +547,7 @@ export function extractNcrpFromDigitalText(
       const holdDateMatch = beforeAmt.match(
         /([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4}(?:\s+[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\s*[AP]M)?)/i
       );
-      const holdDate = holdDateMatch ? holdDateMatch[1].replace(/[\n\r]+/g, ' ').trim() : '-';
+      const holdDate = holdDateMatch ? holdDateMatch[1].replace(/[\n\r\t]+/g, ' ').trim() : '-';
 
       const idPart = holdDateMatch ? beforeAmt.slice(0, holdDateMatch.index).trim() : beforeAmt;
       const tokens = idPart

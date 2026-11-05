@@ -1,18 +1,18 @@
 import { GoogleGenAI } from '@google/genai';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { extractNcrpFromDigitalText } from '../src/utils/ncrpParser';
 
 export const config = {
-  maxDuration: 60,
+  maxDuration: 15,
   api: {
     bodyParser: {
-      sizeLimit: '100mb',
+      sizeLimit: '10mb',
     },
   },
 };
 
-// Pure JavaScript PDF text extractor without any C++ / @napi-rs/canvas dependencies
+// Pure JavaScript PDF text extractor statically bundled for Vercel Serverless
 async function extractDigitalPdfInNode(buffer: Buffer): Promise<{ text: string; pages: { num: number; text: string }[] }> {
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const data = new Uint8Array(buffer);
   const doc = await pdfjsLib.getDocument({
     data,
@@ -59,15 +59,13 @@ async function extractDigitalPdfInNode(buffer: Buffer): Promise<{ text: string; 
   return { text: fullText, pages };
 }
 
-// Candidate models for OCR in prioritized order
+// Official valid Gemini models for OCR in prioritized order
 const CANDIDATE_MODELS = [
-  'gemini-3.5-flash-lite',
-  'gemini-3-flash-preview',
+  'gemini-2.5-flash',
   'gemini-flash-latest',
-  'gemini-3.5-flash',
-  'gemini-3.6-flash',
   'gemini-3.8-flash',
   'gemini-3.1-flash-lite',
+  'gemini-2.5-pro',
 ];
 
 async function callGeminiWithFallback(contents: any, config: any) {
@@ -82,31 +80,23 @@ async function callGeminiWithFallback(contents: any, config: any) {
   });
 
   for (const model of CANDIDATE_MODELS) {
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents,
-          config,
-        });
-        if (response && response.text) {
-          return response;
-        }
-      } catch (err: any) {
-        lastError = err;
-        const errMsg = err?.message || String(err);
-
-        // If quota exhausted (429 RESOURCE_EXHAUSTED), do not retry this model - immediately jump to next model
-        if (errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota exceeded') || errMsg.includes('limit: 20')) {
-          break;
-        }
-
-        if (errMsg.includes('503') || errMsg.includes('demand') || errMsg.includes('UNAVAILABLE')) {
-          await new Promise((r) => setTimeout(r, 1000 * attempt));
-        } else {
-          break;
-        }
+    try {
+      console.log(`[Gemini Engine] Querying model: ${model}...`);
+      const response = await ai.models.generateContent({
+        model,
+        contents,
+        config,
+      });
+      if (response && response.text) {
+        console.log(`[Gemini Engine] Model ${model} succeeded!`);
+        return response;
       }
+    } catch (err: any) {
+      lastError = err;
+      const errMsg = err?.message || String(err);
+      console.warn(`[Gemini Engine] Model ${model} warning: ${errMsg.slice(0, 120)}`);
+      // Immediately failover to next model without retrying or delaying
+      continue;
     }
   }
 
@@ -319,40 +309,11 @@ Return ONLY a JSON object with this exact structure:
     let finalDoc: any = null;
 
     if (hasDigitalText) {
+      console.log(`[OCR PDF] Returning high-speed deterministic extraction (${pageItems.length} pages)...`);
       const deterministicDoc = extractNcrpFromDigitalText(digitalText, pageItems);
-      finalDoc = deterministicDoc;
-
-      if (process.env.GEMINI_API_KEY) {
-        try {
-          const textSample = digitalText.slice(0, 50000);
-          const response = await callGeminiWithFallback(
-            [
-              {
-                text: `Extract all fields and tables from this Indian Cyber Crime Reporting Portal (1930 / NCRP) document into JSON. Extract every row of the Money Transfer Trail (Layer 1 to 15+), exact Destination Bank names, exact Account numbers, exact IFSC codes, holds, and ATM withdrawals without skipping rows:\n\n${textSample}`,
-              },
-            ],
-            {
-              systemInstruction: systemPrompt,
-              responseMimeType: 'application/json',
-              maxOutputTokens: 65536,
-            }
-          );
-          const aiDoc = JSON.parse(response.text || '{}');
-          if (aiDoc) {
-            finalDoc = { ...deterministicDoc, ...aiDoc };
-            if ((!aiDoc.moneyTransferTrail || aiDoc.moneyTransferTrail.length === 0) && deterministicDoc.moneyTransferTrail.length > 0) {
-              finalDoc.moneyTransferTrail = deterministicDoc.moneyTransferTrail;
-            }
-          }
-        } catch (e) {
-          console.warn('Vercel Gemini metadata note:', e);
-          finalDoc = deterministicDoc;
-        }
-      }
-
       return res.status(200).json({
         success: true,
-        data: finalDoc,
+        data: deterministicDoc,
       });
     } else {
       if (!process.env.GEMINI_API_KEY) {

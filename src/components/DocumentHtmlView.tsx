@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { CyberCrimeDocument } from '../data/sampleDocument';
+import { resolveEntityOrBank } from '../utils/entityResolver';
 import { 
   Building2, 
   ShieldAlert, 
@@ -399,12 +400,11 @@ export const DocumentHtmlView: React.FC<Props> = ({
                     })
                     .map((item) => {
                       const layerNum = item.layer || 'Layer : 1';
-                      const isOther =
-                        item.destinationBank?.toLowerCase().includes('other') ||
-                        item.destinationBank?.toLowerCase().includes('npci') ||
-                        item.destinationBank?.toLowerCase().includes('upi') ||
-                        item.destinationAccountNo?.includes('@');
-                      const bank = isOther ? 'NPCI' : item.destinationBank || 'Bank';
+                      const bank = resolveEntityOrBank(
+                        item.destinationBank,
+                        item.destinationAccountNo,
+                        item.referenceNoRemarks || item.transactionIdUtr
+                      );
                       return [layerNum, `${layerNum} (${bank})`];
                     })
                 ).values()
@@ -632,7 +632,9 @@ export const DocumentHtmlView: React.FC<Props> = ({
                         </td>
                         <td className="p-2 text-[11px] text-slate-700">
                           <div>{h.putOnHoldDate}</div>
-                          <div className="text-[10px] text-slate-500">{h.actionTakenBy}</div>
+                          <div className="text-[10px] text-slate-500 font-medium">
+                            {resolveEntityOrBank(h.actionTakenBy, h.accountNo)}
+                          </div>
                         </td>
                       </tr>
                     ))

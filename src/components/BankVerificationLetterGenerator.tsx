@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { CyberCrimeDocument } from '../data/sampleDocument';
+import { resolveEntityOrBank, getEntitySuggestions } from '../utils/entityResolver';
 import {
   ArrowLeft,
   Printer,
@@ -96,6 +97,11 @@ export const BankVerificationLetterGenerator: React.FC<Props> = ({
 
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [selectedBankId, setSelectedBankId] = useState<string>('all');
+  const [customBankNames, setCustomBankNames] = useState<Record<string, string>>({});
+
+  const getEffectiveBankName = (target: BankLetterTarget) => {
+    return customBankNames[target.id] !== undefined ? customBankNames[target.id] : target.bankName;
+  };
 
   // Build target list from transactionsPutOnHold & moneyTransferTrail
   const letterTargets: BankLetterTarget[] = useMemo(() => {
@@ -112,19 +118,16 @@ export const BankVerificationLetterGenerator: React.FC<Props> = ({
             t.transactionIdUtr === hold.transactionIdUtr
         );
 
-        let bank = (hold.actionTakenBy || matchingTrail?.destinationBank || '').trim();
+        const rawBank = (hold.actionTakenBy || matchingTrail?.destinationBank || '').trim();
         const accountNo = (hold.accountNo || matchingTrail?.destinationAccountNo || '-').trim();
         const ifsc = (matchingTrail?.destinationIfsc || '').trim();
         const utr = (hold.transactionIdUtr || matchingTrail?.transactionIdUtr || '-').trim();
 
-        const isOther =
-          bank.toLowerCase() === 'other' ||
-          bank.toLowerCase().includes('other') ||
-          bank.toLowerCase().includes('npci') ||
-          bank.toLowerCase().includes('upi') ||
-          accountNo.includes('@');
-
-        const resolvedBank = isOther ? 'NPCI' : bank || 'Beneficiary Bank';
+        const resolvedBank = resolveEntityOrBank(
+          rawBank,
+          accountNo,
+          matchingTrail?.referenceNoRemarks || utr
+        );
         const key = `${resolvedBank}-${accountNo}-${utr}`;
 
         if (!seen.has(key)) {
@@ -153,13 +156,9 @@ export const BankVerificationLetterGenerator: React.FC<Props> = ({
         const isHoldOrLien = remarks.includes('hold') || remarks.includes('lien');
 
         if (isHoldOrLien) {
-          const bank = (trail.destinationBank || '').trim();
+          const rawBank = (trail.destinationBank || trail.actionTakenBy || '').trim();
           const accountNo = (trail.destinationAccountNo || trail.senderAccountNo || '-').trim();
-          const isOther =
-            bank.toLowerCase().includes('other') ||
-            bank.toLowerCase().includes('npci') ||
-            accountNo.includes('@');
-          const resolvedBank = isOther ? 'NPCI' : bank || 'Beneficiary Bank';
+          const resolvedBank = resolveEntityOrBank(rawBank, accountNo, trail.referenceNoRemarks);
           const key = `${resolvedBank}-${accountNo}`;
 
           if (!seen.has(key)) {
@@ -199,6 +198,7 @@ export const BankVerificationLetterGenerator: React.FC<Props> = ({
 
   const handleCopyText = (target: BankLetterTarget) => {
     const targetOutwardNo = getTargetOutwardNo(target.id);
+    const effectiveBank = getEffectiveBankName(target);
     const text = `${policeStation}
 ${district}
 Mobile No : ${officerPhone || '+916359626151'}
@@ -210,7 +210,7 @@ Date-${letterDate}
 
 To,
 Nodal officer/The Manager
-${target.bankName}
+${effectiveBank}
 
 Subject: Provide Information related to Accounts to prepare a court order.
 Reference: Acknowledgement No. ${doc.acknowledgement.acknowledgementNo}
@@ -475,7 +475,7 @@ ${officerPhone}`;
                       : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
                   }`}
                 >
-                  <span>{t.bankName}</span>
+                  <span>{getEffectiveBankName(t)}</span>
                   <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-black/10">
                     #{tOutward}
                   </span>
@@ -585,7 +585,43 @@ ${officerPhone}`;
                   <div className="text-xs leading-relaxed text-slate-950 mb-3 font-sans">
                     <div className="font-bold">To,</div>
                     <div className="font-bold">Nodal officer/The Manager</div>
-                    <div className="font-bold text-sm text-slate-900">{target.bankName}</div>
+                    <div className="mt-0.5">
+                      <input
+                        type="text"
+                        value={getEffectiveBankName(target)}
+                        onChange={(e) =>
+                          setCustomBankNames((prev) => ({
+                            ...prev,
+                            [target.id]: e.target.value,
+                          }))
+                        }
+                        className="font-bold text-sm text-slate-900 bg-transparent hover:bg-slate-100/80 focus:bg-white focus:ring-1 focus:ring-blue-500 rounded px-1.5 py-0.5 -ml-1.5 border border-transparent hover:border-slate-300 focus:border-blue-500 transition-colors w-full max-w-xl print:border-none print:p-0 print:m-0 print:bg-transparent"
+                        title="ક્લિક કરીને બેંક અથવા પ્લેટફોર્મનું નામ બદલો (Click to edit recipient name)"
+                      />
+                    </div>
+                    {/* Quick Suggestions (no-print) */}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1 no-print">
+                      <span className="text-[10px] text-slate-400 font-medium">ઝડપી બદલો:</span>
+                      {getEntitySuggestions(target.bankName, target.accountNumber).slice(0, 4).map((sug, sIdx) => (
+                        <button
+                          key={sIdx}
+                          type="button"
+                          onClick={() =>
+                            setCustomBankNames((prev) => ({
+                              ...prev,
+                              [target.id]: sug,
+                            }))
+                          }
+                          className={`text-[10px] px-2 py-0.5 rounded-full border transition-all cursor-pointer ${
+                            getEffectiveBankName(target) === sug
+                              ? 'bg-blue-600 text-white border-blue-600 font-bold shadow-xs'
+                              : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-300'
+                          }`}
+                        >
+                          {sug.length > 32 ? sug.split('(')[0].trim() || sug.substring(0, 32) : sug}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Subject and Reference Lines (Centered with Reference directly below Subject) */}
@@ -664,7 +700,7 @@ ${officerPhone}`;
                             {target.accountHolderName || '-'}
                           </td>
                           <td className="border border-slate-900 p-1.5 print:p-1 font-bold font-mono">
-                           
+                            {target.holdAmount}
                           </td>
                           <td className="border border-slate-900 p-1.5 print:p-1"></td>
                           <td className="border border-slate-900 p-1.5 print:p-1 font-semibold">Freeze / Lien</td>

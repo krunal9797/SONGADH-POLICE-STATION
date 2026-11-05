@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { CyberCrimeDocument } from '../data/sampleDocument';
+import { resolveEntityOrBank } from '../utils/entityResolver';
 import { ArrowRight, Building2, MapPin, ShieldAlert, CreditCard, Lock, CheckCircle2, Layers } from 'lucide-react';
 
 interface Props {
@@ -33,17 +34,16 @@ export const MoneyTrailGraph: React.FC<Props> = ({ document: doc, language }) =>
           return isNaN(cleaned) ? acc : acc + cleaned;
         }, 0);
 
-        // Distinct banks in this layer
+        // Distinct banks/entities in this layer
         const banks = Array.from(
           new Set(
-            items.map((i) => {
-              const isOther =
-                i.destinationBank?.toLowerCase().includes('other') ||
-                i.destinationBank?.toLowerCase().includes('npci') ||
-                i.destinationBank?.toLowerCase().includes('upi') ||
-                i.destinationAccountNo?.includes('@');
-              return isOther ? 'NPCI' : i.destinationBank;
-            })
+            items.map((i) =>
+              resolveEntityOrBank(
+                i.destinationBank,
+                i.destinationAccountNo,
+                i.referenceNoRemarks || i.transactionIdUtr
+              )
+            )
           )
         );
 
@@ -158,12 +158,11 @@ export const MoneyTrailGraph: React.FC<Props> = ({ document: doc, language }) =>
                   {/* List accounts in this layer */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                     {group.items.map((item, itemIdx) => {
-                      const isOther =
-                        item.destinationBank?.toLowerCase().includes('other') ||
-                        item.destinationBank?.toLowerCase().includes('npci') ||
-                        item.destinationBank?.toLowerCase().includes('upi') ||
-                        item.destinationAccountNo?.includes('@');
-                      const bankDisplay = isOther ? 'NPCI' : item.destinationBank;
+                      const bankDisplay = resolveEntityOrBank(
+                        item.destinationBank,
+                        item.destinationAccountNo,
+                        item.referenceNoRemarks || item.transactionIdUtr
+                      );
 
                       return (
                         <div key={itemIdx} className="bg-white p-2.5 rounded-lg border border-slate-200 shadow-xs space-y-1">

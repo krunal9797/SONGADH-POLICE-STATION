@@ -8,6 +8,7 @@ import { KycLetterGenerator } from './components/KycLetterGenerator';
 import { BankVerificationLetterGenerator } from './components/BankVerificationLetterGenerator';
 import { LoginPage, UserSession } from './components/LoginPage';
 import { extractTextFromPdfInBrowser } from './utils/clientPdfExtractor';
+import { extractNcrpFromDigitalText } from './utils/ncrpParser';
 import {
   Upload,
   RotateCcw,
@@ -146,21 +147,22 @@ export default function App() {
           clientDigitalText = clientResult.fullText;
           clientPageItems = clientResult.pages;
           clientTotalPages = clientResult.totalPages;
-          if (clientResult.parsedDoc) {
-            clientExtractedDoc = clientResult.parsedDoc;
-          }
+          clientExtractedDoc =
+            clientResult.parsedDoc ||
+            extractNcrpFromDigitalText(clientDigitalText, clientPageItems);
         }
       } catch (browserErr) {
         console.warn('[Browser PDF] In-browser extraction note:', browserErr);
       }
 
-      // If client-side deterministic extraction extracted valid NCRP data, render immediately
+      // If in-browser extraction obtained digital text or records, display immediately
       const hasValidClientDoc =
         clientExtractedDoc &&
-        (clientExtractedDoc.moneyTransferTrail.length > 0 ||
+        (clientDigitalText.length > 100 ||
+          clientExtractedDoc.moneyTransferTrail.length > 0 ||
           clientExtractedDoc.transactionsPutOnHold.length > 0 ||
           clientExtractedDoc.victimAccountTransactions.length > 0 ||
-          (clientExtractedDoc.acknowledgement.acknowledgementNo && clientExtractedDoc.complainant.name));
+          Boolean(clientExtractedDoc.acknowledgement.acknowledgementNo));
 
       if (hasValidClientDoc && clientExtractedDoc) {
         console.log('[App] Client-side extraction succeeded with 0 network latency!');

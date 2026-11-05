@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { extractNcrpFromDigitalText } from '../src/utils/ncrpParser';
 
@@ -59,48 +58,64 @@ async function extractDigitalPdfInNode(buffer: Buffer): Promise<{ text: string; 
   return { text: fullText, pages };
 }
 
-// Official valid Gemini models for OCR in prioritized order
-const CANDIDATE_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-flash-latest',
-  'gemini-3.8-flash',
-  'gemini-3.1-flash-lite',
-  'gemini-2.5-pro',
-];
+// Lightweight native HTTPS call to Gemini Developer REST API (zero child_process or heavy auth dependencies)
+async function callGeminiRestApi(contents: any[], systemInstruction: string): Promise<string> {
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not configured in Vercel environment variables.');
+  }
 
-async function callGeminiWithFallback(contents: any, config: any) {
+  const CANDIDATE_MODELS = [
+    'gemini-2.5-flash',
+    'gemini-flash-latest',
+    'gemini-2.0-flash',
+    'gemini-1.5-flash',
+  ];
+
   let lastError: any = null;
-  const ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY || '',
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
 
   for (const model of CANDIDATE_MODELS) {
     try {
-      console.log(`[Gemini Engine] Querying model: ${model}...`);
-      const response = await ai.models.generateContent({
-        model,
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+      const payload = {
         contents,
-        config,
+        systemInstruction: {
+          parts: [{ text: systemInstruction }],
+        },
+        generationConfig: {
+          responseMimeType: 'application/json',
+          temperature: 0,
+          maxOutputTokens: 32768,
+        },
+      };
+
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
       });
-      if (response && response.text) {
-        console.log(`[Gemini Engine] Model ${model} succeeded!`);
-        return response;
+
+      if (!resp.ok) {
+        const errText = await resp.text();
+        console.warn(`[Gemini REST] Model ${model} returned HTTP ${resp.status}:`, errText.slice(0, 150));
+        lastError = new Error(`Gemini model ${model} returned HTTP ${resp.status}`);
+        continue;
+      }
+
+      const data = await resp.json();
+      const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (text) {
+        return text;
       }
     } catch (err: any) {
       lastError = err;
-      const errMsg = err?.message || String(err);
-      console.warn(`[Gemini Engine] Model ${model} warning: ${errMsg.slice(0, 120)}`);
-      // Immediately failover to next model without retrying or delaying
       continue;
     }
   }
 
-  throw lastError;
+  throw lastError || new Error('All Gemini candidate models failed.');
 }
 
 export default async function handler(req: any, res: any) {
@@ -323,27 +338,26 @@ Return ONLY a JSON object with this exact structure:
         });
       }
 
-      const response = await callGeminiWithFallback(
+      const responseText = await callGeminiRestApi(
         [
           {
-            inlineData: {
-              mimeType: 'application/pdf',
-              data: cleanBase64,
-            },
-          },
-          {
-            text: 'Perform complete, exhaustive multi-page extraction of all pages (Pages 1, 2, 3, 4, 5+), text, and tables from this PDF document into the requested JSON schema. The Money Transfer Trail may have 10 to 15+ layers (Layer 1 through Layer 15+) across multiple pages — extract every single layer and row without skipping or truncating.',
+            parts: [
+              {
+                inlineData: {
+                  mimeType: 'application/pdf',
+                  data: cleanBase64,
+                },
+              },
+              {
+                text: 'Perform complete, exhaustive multi-page extraction of all pages (Pages 1, 2, 3, 4, 5+), text, and tables from this PDF document into the requested JSON schema. The Money Transfer Trail may have 10 to 15+ layers (Layer 1 through Layer 15+) across multiple pages — extract every single layer and row without skipping or truncating.',
+              },
+            ],
           },
         ],
-        {
-          systemInstruction: systemPrompt,
-          responseMimeType: 'application/json',
-          temperature: 0,
-          maxOutputTokens: 32768,
-        }
+        systemPrompt
       );
 
-      finalDoc = JSON.parse(response.text || '{}');
+      finalDoc = JSON.parse(responseText || '{}');
     }
 
     return res.status(200).json({

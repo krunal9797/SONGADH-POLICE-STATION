@@ -871,14 +871,24 @@ app.post('/api/ocr-pdf', async (req: Request, res: Response) => {
 
       // 2. Extract digital text and page breakdowns using pdf-parse
       try {
-        const u8Data = new Uint8Array(pdfBuffer.buffer, pdfBuffer.byteOffset, pdfBuffer.byteLength);
+        const u8Data = new Uint8Array(
+          pdfBuffer.buffer.slice(pdfBuffer.byteOffset, pdfBuffer.byteOffset + pdfBuffer.byteLength)
+        );
         const parser = new PDFParse(u8Data);
         const parseResult = await parser.getText();
         digitalText = (parseResult && parseResult.text) || '';
         pageItems = (parseResult && parseResult.pages) || [];
         console.log(`[OCR PDF] Extracted digital text length: ${digitalText.length} characters across ${pageItems.length} parsed pages`);
       } catch (parseErr) {
-        console.warn('[OCR PDF] Digital text extraction warning:', parseErr);
+        console.warn('[OCR PDF] First digital text extraction attempt:', parseErr);
+        try {
+          const parser = new PDFParse(new Uint8Array(pdfBuffer));
+          const parseResult = await parser.getText();
+          digitalText = (parseResult && parseResult.text) || '';
+          pageItems = (parseResult && parseResult.pages) || [];
+        } catch (parseErr2) {
+          console.warn('[OCR PDF] Second digital text extraction attempt:', parseErr2);
+        }
       }
     } else {
       console.log(`\n========================================`);

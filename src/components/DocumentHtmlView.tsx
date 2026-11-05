@@ -140,7 +140,9 @@ export const DocumentHtmlView: React.FC<Props> = ({
             <div className="text-base md:text-lg font-bold text-rose-900 mt-1">
               {doc.financialSummary.totalFraudulentAmountReported}
             </div>
-            <div className="text-[10px] text-rose-600 font-medium">8 Transactions</div>
+            <div className="text-[10px] text-rose-600 font-medium">
+              {doc.victimAccountTransactions.length} {isGu ? 'વ્યવહારો' : 'Transactions'}
+            </div>
           </div>
 
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
@@ -150,7 +152,9 @@ export const DocumentHtmlView: React.FC<Props> = ({
             <div className="text-base md:text-lg font-bold text-emerald-900 mt-1">
               {doc.financialSummary.totalLienAmount}
             </div>
-            <div className="text-[10px] text-emerald-600 font-medium">Put On Hold</div>
+            <div className="text-[10px] text-emerald-600 font-medium">
+              {doc.transactionsPutOnHold.length} {isGu ? 'હોલ્ડ વ્યવહાર' : 'Put On Hold'}
+            </div>
           </div>
 
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
@@ -160,7 +164,9 @@ export const DocumentHtmlView: React.FC<Props> = ({
             <div className="text-base md:text-lg font-bold text-blue-900 mt-1">
               {doc.financialSummary.withdrawalThroughAtmAmount}
             </div>
-            <div className="text-[10px] text-blue-600 font-medium">13 Withdrawals</div>
+            <div className="text-[10px] text-blue-600 font-medium">
+              {doc.atmWithdrawals.length} {isGu ? 'ઉપાડ વ્યવહાર' : 'Withdrawals'}
+            </div>
           </div>
 
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
@@ -170,7 +176,9 @@ export const DocumentHtmlView: React.FC<Props> = ({
             <div className="text-base md:text-lg font-bold text-amber-900 mt-1">
               {doc.financialSummary.totalDisputedAmount}
             </div>
-            <div className="text-[10px] text-amber-600 font-medium">SBI + Paytm</div>
+            <div className="text-[10px] text-amber-600 font-medium">
+              {doc.pendingTransactions.length} {isGu ? 'પેન્ડિંગ' : 'Pending'}
+            </div>
           </div>
 
           <div className="bg-purple-50 border border-purple-200 rounded-xl p-3">
@@ -180,7 +188,9 @@ export const DocumentHtmlView: React.FC<Props> = ({
             <div className="text-base md:text-lg font-bold text-purple-900 mt-1">
               {doc.financialSummary.othersAmount}
             </div>
-            <div className="text-[10px] text-purple-600 font-medium">Tracked</div>
+            <div className="text-[10px] text-purple-600 font-medium">
+              {doc.othersUnder500.length} {isGu ? 'વ્યવહારો' : 'Txns'}
+            </div>
           </div>
 
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
@@ -581,11 +591,16 @@ export const DocumentHtmlView: React.FC<Props> = ({
         <section className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Put on Hold */}
           <div>
-            <div className="flex items-center gap-2 border-b-2 border-emerald-900 pb-2 mb-3">
-              <Lock className="w-5 h-5 text-emerald-700" />
-              <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
-                {isGu ? '૬. હોલ્ડ પર મુકાયેલા વ્યવહારો' : '6. Transactions Put on Hold'}
-              </h2>
+            <div className="flex items-center justify-between border-b-2 border-emerald-900 pb-2 mb-3">
+              <div className="flex items-center gap-2">
+                <Lock className="w-5 h-5 text-emerald-700" />
+                <h2 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+                  {isGu ? '૬. હોલ્ડ પર મુકાયેલા વ્યવહારો' : '6. Transactions Put on Hold'}
+                </h2>
+              </div>
+              <span className="text-[11px] font-bold text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300">
+                {doc.transactionsPutOnHold.length} {isGu ? 'વ્યવહાર' : 'Txns'} • {doc.financialSummary.totalLienAmount}
+              </span>
             </div>
             <div className="border border-slate-300 rounded-lg overflow-hidden">
               <table className="w-full text-xs text-left border-collapse">
@@ -598,22 +613,30 @@ export const DocumentHtmlView: React.FC<Props> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {doc.transactionsPutOnHold.map((h) => (
-                    <tr key={h.sNo} className="hover:bg-emerald-50/40">
-                      <td className="p-2 border-r border-slate-200 text-center text-slate-500">{h.sNo}</td>
-                      <td className="p-2 border-r border-slate-200 font-mono text-[11px]">
-                        <div className="font-bold text-slate-800">{h.accountNo}</div>
-                        <div className="text-[10px] text-slate-500">{h.transactionIdUtr}</div>
-                      </td>
-                      <td className="p-2 border-r border-slate-200 text-right font-bold text-emerald-700">
-                        ₹ {h.putOnHoldAmount.replace(/^(?:Rs\.?|₹)\s*/i, '')}
-                      </td>
-                      <td className="p-2 text-[11px] text-slate-700">
-                        <div>{h.putOnHoldDate}</div>
-                        <div className="text-[10px] text-slate-500">{h.actionTakenBy}</div>
+                  {doc.transactionsPutOnHold.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="p-4 text-center text-slate-400 italic">
+                        {isGu ? 'કોઈ હોલ્ડ વ્યવહાર મળ્યો નથી' : 'No transactions put on hold found'}
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    doc.transactionsPutOnHold.map((h) => (
+                      <tr key={h.sNo} className="hover:bg-emerald-50/40">
+                        <td className="p-2 border-r border-slate-200 text-center text-slate-500">{h.sNo}</td>
+                        <td className="p-2 border-r border-slate-200 font-mono text-[11px]">
+                          <div className="font-bold text-slate-800">{h.accountNo}</div>
+                          <div className="text-[10px] text-slate-500">{h.transactionIdUtr}</div>
+                        </td>
+                        <td className="p-2 border-r border-slate-200 text-right font-bold text-emerald-700">
+                          ₹ {h.putOnHoldAmount.replace(/^(?:Rs\.?|₹)\s*/i, '')}
+                        </td>
+                        <td className="p-2 text-[11px] text-slate-700">
+                          <div>{h.putOnHoldDate}</div>
+                          <div className="text-[10px] text-slate-500">{h.actionTakenBy}</div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -766,14 +789,38 @@ export const DocumentHtmlView: React.FC<Props> = ({
               </div>
             </div>
 
-            <div className="flex justify-end pt-2">
+            <div className="flex justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setActiveLetterModal(null)}
-                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition cursor-pointer"
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold rounded-xl text-xs transition cursor-pointer"
               >
                 {isGu ? 'બંધ કરો (Close)' : 'Close'}
               </button>
+              {activeLetterModal === 'bank_verification' && onGenerateBankLetter && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveLetterModal(null);
+                    onGenerateBankLetter();
+                  }}
+                  className="px-4 py-2 bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-sm"
+                >
+                  {isGu ? 'લેટર જનરેટર ખોલો (Open Generator)' : 'Open Letter Generator'}
+                </button>
+              )}
+              {activeLetterModal === 'kyc' && onGenerateKycLetter && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveLetterModal(null);
+                    onGenerateKycLetter();
+                  }}
+                  className="px-4 py-2 bg-gradient-to-r from-blue-700 to-indigo-800 hover:from-blue-800 text-white font-bold rounded-xl text-xs transition cursor-pointer shadow-sm"
+                >
+                  {isGu ? 'KYC લેટર જનરેટર ખોલો' : 'Open KYC Generator'}
+                </button>
+              )}
             </div>
           </div>
         </div>

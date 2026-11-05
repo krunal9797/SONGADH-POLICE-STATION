@@ -129,9 +129,8 @@ export const BankVerificationLetterGenerator: React.FC<Props> = ({
 
         if (!seen.has(key)) {
           seen.add(key);
-          let amt = hold.putOnHoldAmount || '0.00';
-          if (!amt.startsWith('₹')) amt = `₹${amt}`;
-          if (!amt.endsWith('/-')) amt = `${amt}/-`;
+          let rawAmt = (hold.putOnHoldAmount || '0.00').replace(/^(?:Rs\.?|₹)\s*/i, '').trim();
+          let amt = `₹ ${rawAmt}/-`;
 
           list.push({
             id: `hold-${idx + 1}`,

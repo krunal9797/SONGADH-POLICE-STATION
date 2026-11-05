@@ -605,7 +605,9 @@ export const DocumentHtmlView: React.FC<Props> = ({
                         <div className="font-bold text-slate-800">{h.accountNo}</div>
                         <div className="text-[10px] text-slate-500">{h.transactionIdUtr}</div>
                       </td>
-                      <td className="p-2 border-r border-slate-200 text-right font-bold text-emerald-700">₹ {h.putOnHoldAmount}</td>
+                      <td className="p-2 border-r border-slate-200 text-right font-bold text-emerald-700">
+                        ₹ {h.putOnHoldAmount.replace(/^(?:Rs\.?|₹)\s*/i, '')}
+                      </td>
                       <td className="p-2 text-[11px] text-slate-700">
                         <div>{h.putOnHoldDate}</div>
                         <div className="text-[10px] text-slate-500">{h.actionTakenBy}</div>

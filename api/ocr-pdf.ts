@@ -1,10 +1,12 @@
 import { GoogleGenAI } from '@google/genai';
+import { PDFParse } from 'pdf-parse';
+import { extractNcrpFromDigitalText } from '../src/utils/ncrpParser';
 
 export const config = {
   maxDuration: 60,
   api: {
     bodyParser: {
-      sizeLimit: '50mb',
+      sizeLimit: '100mb',
     },
   },
 };
@@ -18,8 +20,16 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Candidate models for OCR. gemini-3.1-flash-lite has separate free tier quota and fast latency
-const CANDIDATE_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+// Candidate models for OCR in prioritized order
+const CANDIDATE_MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-3-flash-preview',
+  'gemini-flash-latest',
+  'gemini-3.5-flash',
+  'gemini-3.6-flash',
+  'gemini-3.8-flash',
+  'gemini-3.1-flash-lite',
+];
 
 async function callGeminiWithFallback(contents: any, config: any) {
   let lastError: any = null;
@@ -76,10 +86,10 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { pdfBase64 } = req.body || {};
+    const { pdfBase64, digitalText: incomingDigitalText, pageItems: incomingPageItems, totalPages: incomingTotalPages } = req.body || {};
 
-    if (!pdfBase64) {
-      return res.status(400).json({ error: 'No PDF provided.' });
+    if (!pdfBase64 && !incomingDigitalText) {
+      return res.status(400).json({ error: 'No PDF or digital text provided.' });
     }
 
     if (!process.env.GEMINI_API_KEY) {
@@ -88,8 +98,8 @@ export default async function handler(req: any, res: any) {
       });
     }
 
-    // Clean base64 if it has data URL prefix
-    const cleanBase64 = pdfBase64.replace(/^data:application\/pdf;base64,/, '');
+    // Clean base64 if provided
+    const cleanBase64 = pdfBase64 ? pdfBase64.replace(/^data:application\/pdf;base64,/, '') : '';
 
     const systemPrompt = `You are an ultra-high precision document OCR and structured data extraction engine specialized in Indian Cyber Crime Reporting Portal (1930 / NCRP), police acknowledgments, and financial fraud dispute reports.
 
@@ -250,38 +260,79 @@ Return ONLY a JSON object with this exact structure:
   "rawTextSummary": string
 }`;
 
-    const response = await callGeminiWithFallback(
-      [
-        {
-          inlineData: {
-            mimeType: 'application/pdf',
-            data: cleanBase64,
-          },
-        },
-        {
-          text: 'Perform complete, exhaustive multi-page extraction of all pages (Pages 1, 2, 3, 4, 5+), text, and tables from this PDF document into the requested JSON schema. The Money Transfer Trail may have 10 to 15+ layers (Layer 1 through Layer 15+) across multiple pages — extract every single layer and row without skipping or truncating.',
-        },
-      ],
-      {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json',
-        temperature: 0,
-        maxOutputTokens: 32768,
-      }
-    );
+    let digitalText = incomingDigitalText || '';
+    let pageItems: { num: number; text: string }[] = incomingPageItems || [];
 
-    const jsonText = response.text || '{}';
-    let parsedData = {};
-    try {
-      parsedData = JSON.parse(jsonText);
-    } catch (parseErr) {
-      console.error('Failed to parse Gemini output as JSON:', jsonText.slice(0, 500));
-      return res.status(500).json({ error: 'Failed to parse extracted JSON', raw: jsonText });
+    if (!digitalText && cleanBase64) {
+      const pdfBuffer = Buffer.from(cleanBase64, 'base64');
+      try {
+        const u8Data = new Uint8Array(pdfBuffer.buffer, pdfBuffer.byteOffset, pdfBuffer.byteLength);
+        const parser = new PDFParse(u8Data);
+        const parseResult = await parser.getText();
+        digitalText = (parseResult && parseResult.text) || '';
+        pageItems = (parseResult && parseResult.pages) || [];
+      } catch (_) {}
+    }
+
+    const hasDigitalText = digitalText.trim().length > 80;
+    let finalDoc: any = null;
+
+    if (hasDigitalText) {
+      const deterministicDoc = extractNcrpFromDigitalText(digitalText, pageItems);
+      finalDoc = deterministicDoc;
+
+      try {
+        const textSample = digitalText.slice(0, 60000);
+        const response = await callGeminiWithFallback(
+          [
+            {
+              text: `Extract all fields and tables from this Indian Cyber Crime Reporting Portal (1930 / NCRP) document into JSON. Extract every row of the Money Transfer Trail (Layer 1 to 15+), exact Destination Bank names, exact Account numbers, exact IFSC codes, holds, and ATM withdrawals without skipping rows:\n\n${textSample}`,
+            },
+          ],
+          {
+            systemInstruction: systemPrompt,
+            responseMimeType: 'application/json',
+            maxOutputTokens: 65536,
+          }
+        );
+        const aiDoc = JSON.parse(response.text || '{}');
+        if (aiDoc) {
+          finalDoc = { ...deterministicDoc, ...aiDoc };
+          if ((!aiDoc.moneyTransferTrail || aiDoc.moneyTransferTrail.length === 0) && deterministicDoc.moneyTransferTrail.length > 0) {
+            finalDoc.moneyTransferTrail = deterministicDoc.moneyTransferTrail;
+          }
+        }
+      } catch (e) {
+        console.warn('Vercel Gemini metadata note:', e);
+        finalDoc = deterministicDoc;
+      }
+    } else {
+      const response = await callGeminiWithFallback(
+        [
+          {
+            inlineData: {
+              mimeType: 'application/pdf',
+              data: cleanBase64,
+            },
+          },
+          {
+            text: 'Perform complete, exhaustive multi-page extraction of all pages (Pages 1, 2, 3, 4, 5+), text, and tables from this PDF document into the requested JSON schema. The Money Transfer Trail may have 10 to 15+ layers (Layer 1 through Layer 15+) across multiple pages — extract every single layer and row without skipping or truncating.',
+          },
+        ],
+        {
+          systemInstruction: systemPrompt,
+          responseMimeType: 'application/json',
+          temperature: 0,
+          maxOutputTokens: 32768,
+        }
+      );
+
+      finalDoc = JSON.parse(response.text || '{}');
     }
 
     return res.status(200).json({
       success: true,
-      data: parsedData,
+      data: finalDoc,
     });
   } catch (error: any) {
     console.error('OCR Error on Vercel:', error);

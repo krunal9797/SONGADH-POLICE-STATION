@@ -5,15 +5,18 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import nodemailer from 'nodemailer';
+import { PDFDocument } from 'pdf-lib';
+import { PDFParse } from 'pdf-parse';
+import { extractNcrpFromDigitalText } from './src/utils/ncrpParser';
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Body parser with 50mb limit for PDF base64 payloads
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// High body parser limit (150mb) to support 20-50+ page PDFs without 413 Payload Too Large
+app.use(express.json({ limit: '150mb' }));
+app.use(express.urlencoded({ limit: '150mb', extended: true }));
 
 // Authorized email as requested by user
 const AUTHORIZED_EMAIL = 'gamitkrunal7997@gmail.com';
@@ -442,8 +445,16 @@ const ai = new GoogleGenAI({
   },
 });
 
-// Candidate models for OCR. gemini-3.1-flash-lite has separate free tier quota and fast latency
-const CANDIDATE_MODELS = ['gemini-3.1-flash-lite', 'gemini-3.8-flash'];
+// Candidate models for OCR in prioritized order with instant automatic failover
+const CANDIDATE_MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-3-flash-preview',
+  'gemini-flash-latest',
+  'gemini-3.5-flash',
+  'gemini-3.6-flash',
+  'gemini-3.8-flash',
+  'gemini-3.1-flash-lite',
+];
 
 async function callGeminiWithFallback(contents: any, config: any) {
   let lastError: any = null;
@@ -451,28 +462,28 @@ async function callGeminiWithFallback(contents: any, config: any) {
   for (const model of CANDIDATE_MODELS) {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        console.log(`Calling Gemini model: ${model} (attempt ${attempt})...`);
+        console.log(`[Gemini Engine] Querying model: ${model} (attempt ${attempt})...`);
         const response = await ai.models.generateContent({
           model,
           contents,
           config,
         });
         if (response && response.text) {
+          console.log(`[Gemini Engine] Model ${model} succeeded!`);
           return response;
         }
       } catch (err: any) {
         lastError = err;
         const errMsg = err?.message || String(err);
-        console.warn(`Model ${model} attempt ${attempt} failed:`, errMsg);
+        console.warn(`[Gemini Engine] Model ${model} attempt ${attempt} warning: ${errMsg.slice(0, 120)}`);
 
-        // If quota exhausted (429 RESOURCE_EXHAUSTED), do not retry this model - immediately jump to next model
+        // If quota exhausted (429), break immediately to test next candidate model
         if (errMsg.includes('RESOURCE_EXHAUSTED') || errMsg.includes('Quota exceeded') || errMsg.includes('limit: 20')) {
-          console.warn(`Model ${model} quota exhausted, skipping further attempts on this model.`);
           break;
         }
 
-        // If it is temporary 503 (high demand) or transient 429, pause briefly and retry once
-        if (errMsg.includes('503') || errMsg.includes('demand') || errMsg.includes('UNAVAILABLE')) {
+        // If 503 high demand or temporary unavailable, pause for traffic spike to subside
+        if (errMsg.includes('503') || errMsg.includes('demand') || errMsg.includes('UNAVAILABLE') || errMsg.includes('overloaded')) {
           await new Promise((r) => setTimeout(r, 1000 * attempt));
         } else {
           break;
@@ -484,31 +495,106 @@ async function callGeminiWithFallback(contents: any, config: any) {
   throw lastError;
 }
 
-// API endpoint to process any uploaded PDF using Gemini 3.8 Flash OCR & Extraction
-app.post('/api/ocr-pdf', async (req: Request, res: Response) => {
+// Auto-repair JSON parser that recovers from truncated brackets, unclosed quotes, and trailing commas
+function cleanAndParseJson(rawText: string): any {
+  if (!rawText || !rawText.trim()) return {};
+  let cleaned = rawText.trim();
+
+  // Strip markdown fences
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  // Start from first { or [
+  const firstBrace = cleaned.indexOf('{');
+  const firstBracket = cleaned.indexOf('[');
+  let startIdx = 0;
+  if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+    startIdx = firstBrace;
+  } else if (firstBracket !== -1) {
+    startIdx = firstBracket;
+  }
+  if (startIdx > 0) {
+    cleaned = cleaned.substring(startIdx);
+  }
+
   try {
-    const { pdfBase64 } = req.body;
+    return JSON.parse(cleaned);
+  } catch (e1) {
+    // Strip trailing commas before } or ]
+    let sanitized = cleaned.replace(/,\s*([}\]])/g, '$1');
+    try {
+      return JSON.parse(sanitized);
+    } catch (e2) {
+      // Auto-balance open braces and brackets
+      const stack: string[] = [];
+      let inString = false;
+      let escaped = false;
 
-    if (!pdfBase64) {
-      return res.status(400).json({ error: 'No PDF provided.' });
+      for (let i = 0; i < sanitized.length; i++) {
+        const ch = sanitized[i];
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === '\\') {
+          escaped = true;
+          continue;
+        }
+        if (ch === '"') {
+          inString = !inString;
+          continue;
+        }
+        if (!inString) {
+          if (ch === '{' || ch === '[') {
+            stack.push(ch);
+          } else if (ch === '}' && stack[stack.length - 1] === '{') {
+            stack.pop();
+          } else if (ch === ']' && stack[stack.length - 1] === '[') {
+            stack.pop();
+          }
+        }
+      }
+
+      if (inString) {
+        sanitized += '"';
+      }
+
+      // Remove any dangling key or trailing comma before auto-closing
+      sanitized = sanitized.replace(/,\s*$/, '');
+      while (stack.length > 0) {
+        const top = stack.pop();
+        sanitized += top === '{' ? '}' : ']';
+      }
+
+      try {
+        return JSON.parse(sanitized);
+      } catch (e3) {
+        console.warn('[JSON Repair] Auto-balance failed, attempting regex substring recovery...');
+        const lastBrace = sanitized.lastIndexOf('}');
+        if (lastBrace > 0) {
+          try {
+            return JSON.parse(sanitized.substring(0, lastBrace + 1));
+          } catch (_) {}
+        }
+        throw e1;
+      }
     }
+  }
+}
 
-    // Clean base64 if it has data URL prefix
-    const cleanBase64 = pdfBase64.replace(/^data:application\/pdf;base64,/, '');
-
-    const systemPrompt = `You are an ultra-high precision document OCR and structured data extraction engine specialized in Indian Cyber Crime Reporting Portal (1930 / NCRP), police acknowledgments, and financial fraud dispute reports.
+// System prompt for full document or first batch
+const MAIN_OCR_PROMPT = `You are an ultra-high precision document OCR and structured data extraction engine specialized in Indian Cyber Crime Reporting Portal (1930 / NCRP), police acknowledgments, and financial fraud dispute reports.
 
 CRITICAL MULTI-PAGE & MULTI-LAYER TRAIL RULES (PAGES 1, 2, 3, 4, 5+ / LAYERS 1 TO 15+):
-1. SCAN ALL PAGES: This document often spans 3 to 5 pages or more. You MUST exhaustively extract every table across all pages. Do NOT stop after page 1 or page 2.
-2. EXTREME MULTI-LAYER MONEY TRAIL (10 TO 15+ LAYERS): The "Money Transfer Trail (Multi-Layer Flow)" table can extend across 10 to 15 layers or more (e.g., Layer 1, Layer 2, Layer 3, Layer 4, Layer 5, Layer 6, Layer 7, Layer 8, Layer 9, Layer 10, Layer 11, Layer 12, Layer 13, Layer 14, Layer 15, and beyond) spanning multiple pages. You MUST extract EVERY SINGLE ROW in sequential order from Layer 1 all the way through Layer 15+. Never skip any intermediate layers, never truncate, and never stop early.
-3. ZERO-HALLUCINATION BANK NAMES & ACCOUNTS: Never guess, invent, or substitute bank names. If the table says "State Bank of India", write exactly "State Bank of India". If it says "YES Bank", write "YES Bank". If it says "Paytm Payments Bank", "Bank of Baroda", "HDFC Bank", "ICICI Bank", "Union Bank of India", "Punjab National Bank", "Canara Bank", "Axis Bank", "Kotak Mahindra Bank", "Fincare Small Finance Bank", "Airtel Payments Bank", "India Post Payments Bank", etc., transcribe the exact printed name. If it contains a UPI handle/VPA (e.g. name@oksbi, user@paytm) or "Other", preserve that exact string.
+1. SCAN ALL PAGES: Extract all tables exhaustively. Do NOT stop after page 1 or page 2.
+2. EXTREME MULTI-LAYER MONEY TRAIL (10 TO 15+ LAYERS): The "Money Transfer Trail (Multi-Layer Flow)" table can extend across 10 to 15 layers or more (Layer 1 through Layer 15+) across multiple pages. You MUST extract EVERY SINGLE ROW in sequential order. Never skip intermediate layers, never truncate.
+3. ZERO-HALLUCINATION BANK NAMES & ACCOUNTS: Never guess or invent bank names. Transcribe exact names (State Bank of India, YES Bank, Paytm Payments Bank, Bank of Baroda, HDFC Bank, ICICI Bank, Union Bank of India, Punjab National Bank, Canara Bank, Axis Bank, Kotak Mahindra Bank, Fincare Small Finance Bank, Airtel Payments Bank, India Post Payments Bank, etc.). If UPI/VPA handle is shown, preserve it.
 4. EXACT NUMBERS & CODES: Copy account numbers, IFSC codes, UTR numbers, transaction dates, and rupee amounts character-by-character. Preserve leading zeros in account numbers (e.g., "00000045507539522").
-5. TRANSACTIONS PUT ON HOLD: Extract every single hold entry with its exact Hold Amount, Account Number, IFSC Code, and Action Taken By Bank.
-6. WITHDRAWAL THROUGH ATM: Extract all ATM withdrawal entries with exact ATM ID, location address, and amount.
+5. TRANSACTIONS PUT ON HOLD: Extract every hold entry with Hold Amount, Account Number, IFSC, and Action Taken By Bank.
+6. WITHDRAWAL THROUGH ATM: Extract all ATM withdrawals with ATM ID, location, and amount.
 
 Return ONLY a JSON object with this exact structure:
 {
-  "documentTitle": string (e.g. "Cyber Crime Incident Acknowledgement Slip"),
+  "documentTitle": string,
   "acknowledgement": {
     "acknowledgementNo": string,
     "category": string,
@@ -655,42 +741,301 @@ Return ONLY a JSON object with this exact structure:
   "rawTextSummary": string
 }`;
 
-    const response = await callGeminiWithFallback(
-      [
-        {
-          inlineData: {
-            mimeType: 'application/pdf',
-            data: cleanBase64,
-          },
-        },
-        {
-          text: 'Perform complete, exhaustive multi-page extraction of all pages (Pages 1, 2, 3, 4, 5+), text, and tables from this PDF document into the requested JSON schema. The Money Transfer Trail may have 10 to 15+ layers (Layer 1 through Layer 15+) across multiple pages — extract every single layer and row without skipping or truncating.',
-        },
-      ],
-      {
-        systemInstruction: systemPrompt,
-        responseMimeType: 'application/json',
-        temperature: 0,
-        maxOutputTokens: 32768,
-      }
-    );
+// Continuation prompt for subsequent pages (money trail, holds, withdrawals)
+const CONTINUATION_OCR_PROMPT = `You are an ultra-high precision tabular extraction engine specialized in Indian Cyber Crime Reporting Portal (1930 / NCRP) multi-page money trail reports.
 
-    const jsonText = response.text || '{}';
-    let parsedData = {};
-    try {
-      parsedData = JSON.parse(jsonText);
-    } catch (parseErr) {
-      console.error('Failed to parse Gemini output as JSON:', jsonText.slice(0, 500));
-      return res.status(500).json({ error: 'Failed to parse extracted JSON', raw: jsonText });
+CRITICAL CONTINUATION RULES:
+These are continuation pages of a large multi-page NCRP PDF (up to 20 to 50+ pages).
+Extract EVERY SINGLE transaction row present in these continuation pages for:
+1. Money Transfer Trail (Multi-Layer Flow: Layers 1 to 15+)
+2. Transactions Put On Hold
+3. ATM Withdrawals
+4. Others (Under 500)
+5. Any additional Victim Account Transactions or Pending Transactions
+
+Extract exact Bank names (State Bank of India, YES Bank, Bank of Baroda, HDFC, ICICI, etc.), IFSC, Account Numbers (preserve leading zeros), UTRs, and Rupee amounts. Do NOT truncate or skip rows.
+
+Return ONLY a JSON object with this exact structure:
+{
+  "moneyTransferTrail": [
+    {
+      "sNo": string or number,
+      "senderAccountNo": string,
+      "senderTxnOrUtr": string,
+      "layer": string,
+      "destinationBank": string,
+      "destinationAccountNo": string,
+      "destinationIfsc": string,
+      "transactionIdUtr": string,
+      "transactionDateTime": string,
+      "transactionAmount": string,
+      "disputedAmount": string,
+      "referenceNoRemarks": string,
+      "actionTakenBy": string,
+      "dateOfAction": string
     }
+  ],
+  "transactionsPutOnHold": [
+    {
+      "sNo": string or number,
+      "accountNo": string,
+      "transactionIdUtr": string,
+      "putOnHoldDate": string,
+      "putOnHoldAmount": string,
+      "actionTakenBy": string,
+      "dateOfAction": string
+    }
+  ],
+  "atmWithdrawals": [
+    {
+      "sNo": string or number,
+      "accountNo": string,
+      "transactionIdUtr": string,
+      "withdrawalDateTime": string,
+      "withdrawalAmount": string,
+      "disputedAmount": string,
+      "referenceRemarks": string,
+      "atmId": string,
+      "atmLocation": string,
+      "actionTakenBy": string,
+      "dateOfAction": string
+    }
+  ],
+  "othersUnder500": [
+    {
+      "sNo": string or number,
+      "accountNo": string,
+      "transactionIdUtr": string,
+      "referenceRemarks": string,
+      "actionTakenBy": string,
+      "dateOfAction": string
+    }
+  ],
+  "victimAccountTransactions": [],
+  "pendingTransactions": []
+}`;
+
+// Merge continuation chunk arrays into base document
+function mergeDocParts(baseDoc: any, addition: any) {
+  if (!baseDoc || !addition) return;
+  const arrayKeys = [
+    'moneyTransferTrail',
+    'transactionsPutOnHold',
+    'atmWithdrawals',
+    'othersUnder500',
+    'victimAccountTransactions',
+    'pendingTransactions',
+    'supportingEvidence',
+    'fraudBreakdown',
+  ];
+
+  for (const key of arrayKeys) {
+    if (Array.isArray(addition[key]) && addition[key].length > 0) {
+      if (!Array.isArray(baseDoc[key])) {
+        baseDoc[key] = [];
+      }
+      baseDoc[key].push(...addition[key]);
+    }
+  }
+}
+
+// API endpoint to process any uploaded PDF (1 to 50+ pages) without failures
+app.post('/api/ocr-pdf', async (req: Request, res: Response) => {
+  try {
+    const { pdfBase64, filename, digitalText: incomingDigitalText, pageItems: incomingPageItems, totalPages: incomingTotalPages } = req.body;
+
+    if (!pdfBase64 && !incomingDigitalText) {
+      return res.status(400).json({ error: 'No PDF or digital text provided.' });
+    }
+
+    let totalPages = incomingTotalPages || (incomingPageItems?.length || 1);
+    let digitalText = incomingDigitalText || '';
+    let pageItems: { num: number; text: string }[] = incomingPageItems || [];
+    let pdfDoc: PDFDocument | null = null;
+    const cleanBase64 = pdfBase64 ? pdfBase64.replace(/^data:application\/pdf;base64,/, '') : '';
+
+    if (cleanBase64 && !digitalText) {
+      const pdfBuffer = Buffer.from(cleanBase64, 'base64');
+
+      console.log(`\n========================================`);
+      console.log(`[OCR PDF INCOMING] File: ${filename || 'document.pdf'}, Payload size: ${(pdfBuffer.length / (1024 * 1024)).toFixed(2)} MB`);
+
+      // 1. Inspect PDF page count using pdf-lib
+      try {
+        pdfDoc = await PDFDocument.load(pdfBuffer, { ignoreEncryption: true });
+        totalPages = pdfDoc.getPageCount();
+        console.log(`[OCR PDF] Detected total pages: ${totalPages}`);
+      } catch (docErr) {
+        console.warn('[OCR PDF] pdf-lib page detection note:', docErr);
+      }
+
+      // 2. Extract digital text and page breakdowns using pdf-parse
+      try {
+        const u8Data = new Uint8Array(pdfBuffer.buffer, pdfBuffer.byteOffset, pdfBuffer.byteLength);
+        const parser = new PDFParse(u8Data);
+        const parseResult = await parser.getText();
+        digitalText = (parseResult && parseResult.text) || '';
+        pageItems = (parseResult && parseResult.pages) || [];
+        console.log(`[OCR PDF] Extracted digital text length: ${digitalText.length} characters across ${pageItems.length} parsed pages`);
+      } catch (parseErr) {
+        console.warn('[OCR PDF] Digital text extraction warning:', parseErr);
+      }
+    } else {
+      console.log(`\n========================================`);
+      console.log(`[OCR PDF INCOMING TEXT-FIRST] File: ${filename || 'document.pdf'}, Text length: ${digitalText.length}, Pages: ${totalPages}`);
+    }
+
+    // Check if this has readable digital text (standard in NCRP/1930 portal PDFs)
+    const hasDigitalText = digitalText.trim().length > 80;
+    console.log(`[OCR PDF] Mode: ${hasDigitalText ? 'HIGH-SPEED DIGITAL TEXT' : 'SCANNED IMAGE SLICES'}`);
+
+    let finalDoc: any = null;
+
+    if (hasDigitalText) {
+      // ---------------- HIGH-SPEED DETERMINISTIC DIGITAL ENGINE (0s-1s for 1 to 100+ pages) ----------------
+      console.log(`[OCR PDF] Executing high-speed deterministic parser on ${totalPages}-page digital PDF...`);
+      const deterministicDoc = extractNcrpFromDigitalText(digitalText, pageItems);
+      console.log(
+        `[OCR PDF SUCCESS] Deterministic parser extracted ${deterministicDoc.moneyTransferTrail.length} Money Trail rows, ${deterministicDoc.victimAccountTransactions.length} Victim rows, ${deterministicDoc.pendingTransactions.length} Pending rows across ${totalPages} pages in milliseconds with 0 external API delay.`
+      );
+      finalDoc = deterministicDoc;
+    } else {
+      // ---------------- SCANNED IMAGE PIPELINE (Sequential Paced Slices) ----------------
+      if (totalPages <= 6 || !pdfDoc) {
+        // Scanned PDF (<= 6 pages): Send directly via inlineData
+        const response = await callGeminiWithFallback(
+          [
+            {
+              inlineData: {
+                mimeType: 'application/pdf',
+                data: cleanBase64,
+              },
+            },
+            {
+              text: `Perform complete, exhaustive multi-page extraction of all ${totalPages} pages, text, and tables from this scanned PDF document into the requested JSON schema. Extract all Money Transfer Trail rows (Layers 1 to 15+) without skipping or truncating.`,
+            },
+          ],
+          {
+            systemInstruction: MAIN_OCR_PROMPT,
+            responseMimeType: 'application/json',
+            maxOutputTokens: 65536,
+          }
+        );
+
+        finalDoc = cleanAndParseJson(response.text || '{}');
+      } else {
+        // Large scanned PDF (> 6 pages up to 50+ pages): Slice into 6-page sub-documents
+        // IMPORTANT: Process sequentially with rate pacing rather than parallel Promise.all to prevent 503 High Demand
+        console.log(`[OCR PDF] Slicing scanned ${totalPages}-page PDF into 6-page sub-documents with sequential pacing...`);
+
+        // Slice 1: Pages 0 to 5 (Pages 1 to 6)
+        const subDoc1 = await PDFDocument.create();
+        const pagesToCopy1 = Array.from({ length: Math.min(6, totalPages) }, (_, i) => i);
+        const copiedPages1 = await subDoc1.copyPages(pdfDoc, pagesToCopy1);
+        copiedPages1.forEach((p) => subDoc1.addPage(p));
+        const subBytes1 = await subDoc1.save();
+        const subBase64_1 = Buffer.from(subBytes1).toString('base64');
+
+        const slice1Response = await callGeminiWithFallback(
+          [
+            {
+              inlineData: {
+                mimeType: 'application/pdf',
+                data: subBase64_1,
+              },
+            },
+            {
+              text: `Extract all metadata, complainant, suspect, financial summary, and all initial transaction tables from Pages 1 to 6 of this ${totalPages}-page document.`,
+            },
+          ],
+          {
+            systemInstruction: MAIN_OCR_PROMPT,
+            responseMimeType: 'application/json',
+            maxOutputTokens: 65536,
+          }
+        );
+
+        finalDoc = cleanAndParseJson(slice1Response.text || '{}');
+
+        // Slices 2..N sequentially with 1.2s delay to prevent 503 / 429
+        const SLICE_SIZE = 6;
+        for (let startIdx = 6; startIdx < totalPages; startIdx += SLICE_SIZE) {
+          const endIdx = Math.min(startIdx + SLICE_SIZE, totalPages);
+          await new Promise((r) => setTimeout(r, 1200));
+
+          try {
+            console.log(`[OCR PDF] Processing sequential scanned slice: Pages ${startIdx + 1} to ${endIdx}...`);
+            const subDoc = await PDFDocument.create();
+            const indices = Array.from({ length: endIdx - startIdx }, (_, i) => startIdx + i);
+            const copied = await subDoc.copyPages(pdfDoc!, indices);
+            copied.forEach((p) => subDoc.addPage(p));
+            const subBytes = await subDoc.save();
+            const subBase64 = Buffer.from(subBytes).toString('base64');
+
+            const sliceResponse = await callGeminiWithFallback(
+              [
+                {
+                  inlineData: {
+                    mimeType: 'application/pdf',
+                    data: subBase64,
+                  },
+                },
+                {
+                  text: `Extract all Money Transfer Trail rows, holds, and ATM withdrawals from Pages ${startIdx + 1} to ${endIdx}.`,
+                },
+              ],
+              {
+                systemInstruction: CONTINUATION_OCR_PROMPT,
+                responseMimeType: 'application/json',
+                maxOutputTokens: 65536,
+              }
+            );
+
+            const sliceData = cleanAndParseJson(sliceResponse.text || '{}');
+            mergeDocParts(finalDoc, sliceData);
+          } catch (sliceErr) {
+            console.warn(`[OCR PDF] Scanned slice ${startIdx + 1}-${endIdx} note:`, sliceErr);
+            // Continue to next slice without failing entire document
+          }
+        }
+      }
+    }
+
+    // Ensure finalDoc has default structures
+    finalDoc = finalDoc || {};
+    finalDoc.moneyTransferTrail = finalDoc.moneyTransferTrail || [];
+    finalDoc.transactionsPutOnHold = finalDoc.transactionsPutOnHold || [];
+    finalDoc.atmWithdrawals = finalDoc.atmWithdrawals || [];
+    finalDoc.othersUnder500 = finalDoc.othersUnder500 || [];
+    finalDoc.victimAccountTransactions = finalDoc.victimAccountTransactions || [];
+    finalDoc.supportingEvidence = finalDoc.supportingEvidence || [];
+    finalDoc.pendingTransactions = finalDoc.pendingTransactions || [];
+    finalDoc.fraudBreakdown = finalDoc.fraudBreakdown || [];
+
+    // Ensure sequential sNo in moneyTransferTrail
+    finalDoc.moneyTransferTrail.forEach((row: any, idx: number) => {
+      if (!row.sNo || row.sNo === '-' || row.sNo === '') {
+        row.sNo = idx + 1;
+      }
+    });
+
+    console.log(`[OCR PDF COMPLETE] Extracted ${finalDoc.moneyTransferTrail.length} Money Trail rows, ${finalDoc.transactionsPutOnHold.length} Hold rows, ${finalDoc.atmWithdrawals.length} ATM withdrawals.`);
+    console.log(`========================================\n`);
 
     res.json({
       success: true,
-      data: parsedData,
+      data: finalDoc,
+      meta: {
+        totalPages,
+        processingMode: hasDigitalText ? 'high-speed-digital-text' : 'chunked-scanned-slices',
+        trailCount: finalDoc.moneyTransferTrail.length,
+        holdCount: finalDoc.transactionsPutOnHold.length,
+        atmCount: finalDoc.atmWithdrawals.length,
+      },
     });
   } catch (error: any) {
-    console.error('OCR Error:', error);
-    let msg = error?.message || 'Error processing PDF OCR';
+    console.error('[OCR PDF ERROR]', error);
+    let msg = error?.message || 'Error processing multi-page PDF';
     try {
       const parsed = JSON.parse(msg);
       if (parsed?.error?.message) {

@@ -6,7 +6,6 @@ import path from 'path';
 import fs from 'fs';
 import nodemailer from 'nodemailer';
 import { PDFDocument } from 'pdf-lib';
-import { PDFParse } from 'pdf-parse';
 import { extractNcrpFromDigitalText } from './src/utils/ncrpParser';
 
 dotenv.config();
@@ -869,26 +868,55 @@ app.post('/api/ocr-pdf', async (req: Request, res: Response) => {
         console.warn('[OCR PDF] pdf-lib page detection note:', docErr);
       }
 
-      // 2. Extract digital text and page breakdowns using pdf-parse
+      // 2. Extract digital text and page breakdowns using pure JavaScript pdfjs-dist
       try {
-        const u8Data = new Uint8Array(
-          pdfBuffer.buffer.slice(pdfBuffer.byteOffset, pdfBuffer.byteOffset + pdfBuffer.byteLength)
-        );
-        const parser = new PDFParse(u8Data);
-        const parseResult = await parser.getText();
-        digitalText = (parseResult && parseResult.text) || '';
-        pageItems = (parseResult && parseResult.pages) || [];
+        const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+        const data = new Uint8Array(pdfBuffer);
+        const doc = await pdfjsLib.getDocument({
+          data,
+          isEvalSupported: false,
+          useSystemFonts: true,
+        }).promise;
+
+        let fullText = '';
+        pageItems = [];
+
+        for (let i = 1; i <= doc.numPages; i++) {
+          try {
+            const page = await doc.getPage(i);
+            const content = await page.getTextContent();
+            const lines: { y: number; items: { x: number; str: string }[] }[] = [];
+
+            for (const rawItem of content.items as any[]) {
+              const str = (rawItem.str || '').trim();
+              if (!str) continue;
+              const x = rawItem.transform ? rawItem.transform[4] : 0;
+              const y = rawItem.transform ? rawItem.transform[5] : 0;
+              let line = lines.find((l) => Math.abs(l.y - y) <= 3.5);
+              if (!line) {
+                line = { y, items: [] };
+                lines.push(line);
+              }
+              line.items.push({ x, str: rawItem.str.trim() });
+            }
+
+            lines.sort((a, b) => b.y - a.y);
+            const lineStrings = lines.map((l) => {
+              l.items.sort((a, b) => a.x - b.x);
+              return l.items.map((it) => it.str).join('\t');
+            });
+
+            const pageText = lineStrings.join('\n');
+            pageItems.push({ num: i, text: pageText });
+            fullText += '\n' + pageText;
+          } catch (_) {
+            pageItems.push({ num: i, text: '' });
+          }
+        }
+        digitalText = fullText;
         console.log(`[OCR PDF] Extracted digital text length: ${digitalText.length} characters across ${pageItems.length} parsed pages`);
       } catch (parseErr) {
-        console.warn('[OCR PDF] First digital text extraction attempt:', parseErr);
-        try {
-          const parser = new PDFParse(new Uint8Array(pdfBuffer));
-          const parseResult = await parser.getText();
-          digitalText = (parseResult && parseResult.text) || '';
-          pageItems = (parseResult && parseResult.pages) || [];
-        } catch (parseErr2) {
-          console.warn('[OCR PDF] Second digital text extraction attempt:', parseErr2);
-        }
+        console.warn('[OCR PDF] Digital text extraction warning:', parseErr);
       }
     } else {
       console.log(`\n========================================`);

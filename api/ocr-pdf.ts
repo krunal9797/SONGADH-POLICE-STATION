@@ -1,5 +1,4 @@
 import { GoogleGenAI } from '@google/genai';
-import { PDFParse } from 'pdf-parse';
 import { extractNcrpFromDigitalText } from '../src/utils/ncrpParser';
 
 export const config = {
@@ -11,14 +10,54 @@ export const config = {
   },
 };
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || '',
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    },
-  },
-});
+// Pure JavaScript PDF text extractor without any C++ / @napi-rs/canvas dependencies
+async function extractDigitalPdfInNode(buffer: Buffer): Promise<{ text: string; pages: { num: number; text: string }[] }> {
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const data = new Uint8Array(buffer);
+  const doc = await pdfjsLib.getDocument({
+    data,
+    isEvalSupported: false,
+    useSystemFonts: true,
+  }).promise;
+
+  let fullText = '';
+  const pages: { num: number; text: string }[] = [];
+
+  for (let i = 1; i <= doc.numPages; i++) {
+    try {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      const lines: { y: number; items: { x: number; str: string }[] }[] = [];
+
+      for (const rawItem of content.items as any[]) {
+        const str = (rawItem.str || '').trim();
+        if (!str) continue;
+        const x = rawItem.transform ? rawItem.transform[4] : 0;
+        const y = rawItem.transform ? rawItem.transform[5] : 0;
+        let line = lines.find((l) => Math.abs(l.y - y) <= 3.5);
+        if (!line) {
+          line = { y, items: [] };
+          lines.push(line);
+        }
+        line.items.push({ x, str: rawItem.str.trim() });
+      }
+
+      lines.sort((a, b) => b.y - a.y);
+      const lineStrings = lines.map((l) => {
+        l.items.sort((a, b) => a.x - b.x);
+        return l.items.map((it) => it.str).join('\t');
+      });
+
+      const pageText = lineStrings.join('\n');
+      pages.push({ num: i, text: pageText });
+      fullText += '\n' + pageText;
+    } catch (_) {
+      pages.push({ num: i, text: '' });
+    }
+  }
+
+  return { text: fullText, pages };
+}
 
 // Candidate models for OCR in prioritized order
 const CANDIDATE_MODELS = [
@@ -33,6 +72,14 @@ const CANDIDATE_MODELS = [
 
 async function callGeminiWithFallback(contents: any, config: any) {
   let lastError: any = null;
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY || '',
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  });
 
   for (const model of CANDIDATE_MODELS) {
     for (let attempt = 1; attempt <= 2; attempt++) {
@@ -260,20 +307,11 @@ Return ONLY a JSON object with this exact structure:
     if (!digitalText && cleanBase64) {
       const pdfBuffer = Buffer.from(cleanBase64, 'base64');
       try {
-        const u8Data = new Uint8Array(
-          pdfBuffer.buffer.slice(pdfBuffer.byteOffset, pdfBuffer.byteOffset + pdfBuffer.byteLength)
-        );
-        const parser = new PDFParse(u8Data);
-        const parseResult = await parser.getText();
-        digitalText = (parseResult && parseResult.text) || '';
-        pageItems = (parseResult && parseResult.pages) || [];
+        const extracted = await extractDigitalPdfInNode(pdfBuffer);
+        digitalText = extracted.text;
+        pageItems = extracted.pages;
       } catch (e1) {
-        try {
-          const parser = new PDFParse(new Uint8Array(pdfBuffer));
-          const parseResult = await parser.getText();
-          digitalText = (parseResult && parseResult.text) || '';
-          pageItems = (parseResult && parseResult.pages) || [];
-        } catch (_) {}
+        console.warn('[Vercel OCR] Node PDF extraction note:', e1);
       }
     }
 

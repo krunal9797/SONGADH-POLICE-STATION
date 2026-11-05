@@ -1,10 +1,13 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { CyberCrimeDocument } from '../data/sampleDocument';
 import { extractNcrpFromDigitalText } from './ncrpParser';
 
-// Configure PDF.js worker
+// Configure same-origin PDF.js worker via Vite bundling
 try {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version || '4.10.38'}/build/pdf.worker.min.mjs`;
+  if (typeof window !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+  }
 } catch (e) {
   console.warn('PDF.js worker setup note:', e);
 }
@@ -67,7 +70,7 @@ export async function extractTextFromPdfInBrowser(file: File): Promise<Extracted
       // In each line, sort items left to right by X coordinate
       const lineStrings = lines.map((l) => {
         l.items.sort((a, b) => a.x - b.x);
-        return l.items.map((it) => it.str).join(' | ');
+        return l.items.map((it) => it.str).join('\t');
       });
 
       const pageText = lineStrings.join('\n');

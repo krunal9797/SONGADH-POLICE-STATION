@@ -33,13 +33,13 @@ export function resolveEntityOrBank(
     bLow.includes('gpay') ||
     bLow.includes('g-pay') ||
     bLow.includes('g pay') ||
+    bLow.includes('tez') ||
     rLow.includes('google') ||
     rLow.includes('gpay') ||
-    aLow.includes('@okaxis') ||
-    aLow.includes('@okhdfcbank') ||
-    aLow.includes('@oksbi') ||
-    aLow.includes('@okicici') ||
-    aLow.includes('@okbizaxis')
+    rLow.includes('tez') ||
+    aLow.includes('@ok') ||
+    aLow.includes('@goog') ||
+    aLow.includes('google')
   ) {
     return 'Google Pay (Google India Digital Services Pvt. Ltd.)';
   }

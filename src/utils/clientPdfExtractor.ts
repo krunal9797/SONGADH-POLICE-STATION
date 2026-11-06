@@ -18,7 +18,7 @@ export interface ExtractedClientPdf {
   hasDigitalText: boolean;
   totalPages: number;
   fullText: string;
-  pages: { num: number; text: string }[];
+  pages: { num: number; text: string; items?: { x: number; y: number; str: string }[] }[];
   parsedDoc?: CyberCrimeDocument;
 }
 
@@ -71,7 +71,7 @@ export async function extractTextFromPdfInBrowser(file: File): Promise<Extracted
   }
 
   const totalPages = pdf.numPages;
-  const pages: { num: number; text: string }[] = [];
+  const pages: { num: number; text: string; items?: { x: number; y: number; str: string }[] }[] = [];
   let fullText = '';
 
   for (let i = 1; i <= totalPages; i++) {
@@ -82,12 +82,14 @@ export async function extractTextFromPdfInBrowser(file: File): Promise<Extracted
       // Group text items by line using vertical Y-coordinate with 3.5pt tolerance
       const lineTolerance = 3.5;
       const lines: { y: number; items: { x: number; str: string }[] }[] = [];
+      const pageItems: { x: number; y: number; str: string }[] = [];
 
       for (const rawItem of textContent.items as any[]) {
         const str = (rawItem.str || '').trim();
         if (!str) continue;
-        const x = rawItem.transform ? rawItem.transform[4] : 0;
-        const y = rawItem.transform ? rawItem.transform[5] : 0;
+        const x = Math.round(rawItem.transform ? rawItem.transform[4] : 0);
+        const y = Math.round(rawItem.transform ? rawItem.transform[5] : 0);
+        pageItems.push({ x, y, str });
 
         let line = lines.find((l) => Math.abs(l.y - y) <= lineTolerance);
         if (!line) {
@@ -108,11 +110,11 @@ export async function extractTextFromPdfInBrowser(file: File): Promise<Extracted
 
       const pageText = lineStrings.join('\n');
 
-      pages.push({ num: i, text: pageText });
+      pages.push({ num: i, text: pageText, items: pageItems });
       fullText += `\n--- PAGE ${i} OF ${totalPages} ---\n` + pageText;
     } catch (pageErr) {
       console.warn(`[Client PDF] Page ${i} extraction note:`, pageErr);
-      pages.push({ num: i, text: '' });
+      pages.push({ num: i, text: '', items: [] });
     }
   }
 

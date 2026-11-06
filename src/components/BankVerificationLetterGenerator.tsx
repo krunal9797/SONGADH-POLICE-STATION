@@ -182,6 +182,40 @@ export const BankVerificationLetterGenerator: React.FC<Props> = ({
       });
     }
 
+    // 3. Fallback: if no hold records were explicitly tagged, use unique destination accounts / banks from moneyTransferTrail
+    if (list.length === 0 && doc.moneyTransferTrail && doc.moneyTransferTrail.length > 0) {
+      doc.moneyTransferTrail.slice(0, 50).forEach((trail, idx) => {
+        const rawBank = (trail.destinationBank || trail.actionTakenBy || '').trim();
+        const accountNo = (trail.destinationAccountNo || trail.senderAccountNo || '-').trim();
+        if (accountNo === '-' && rawBank === '-') return;
+
+        const resolvedBank = resolveEntityOrBank(rawBank, accountNo, trail.referenceNoRemarks);
+        const key = `${resolvedBank}-${accountNo}`;
+
+        if (!seen.has(key)) {
+          seen.add(key);
+          let amt =
+            trail.disputedAmount ||
+            trail.transactionAmount ||
+            doc.financialSummary.transactionPutOnHoldAmount ||
+            '0.00';
+          if (!amt.startsWith('₹') && !amt.startsWith('Rs.')) amt = `₹ ${amt}`;
+          if (!amt.endsWith('/-')) amt = `${amt}/-`;
+
+          list.push({
+            id: `trail-${idx + 1}`,
+            bankName: resolvedBank,
+            accountNumber: accountNo,
+            ifscCode: trail.destinationIfsc || '',
+            accountHolderName: '',
+            transactionId: trail.transactionIdUtr || '-',
+            holdAmount: amt,
+            dateOfHold: trail.dateOfAction || letterDate,
+          });
+        }
+      });
+    }
+
     return list;
   }, [doc, letterDate]);
 

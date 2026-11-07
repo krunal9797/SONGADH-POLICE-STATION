@@ -1,4 +1,5 @@
 import { CyberCrimeDocument } from '../data/sampleDocument';
+import { resolveEntityOrBank } from './entityResolver';
 
 // Comprehensive dictionary of Indian Financial Institutions & Payment Banks
 export const KNOWN_INDIAN_BANKS = [
@@ -291,7 +292,9 @@ export function extractNcrpFromDigitalText(
       'Additional Information by Police',
       'Supporting Evidence :',
       'Pending Transactions:',
+      'List of Pending Transactions:',
       'Money Transfer to',
+      'Money Transfer',
     ];
     let vicEnd = cleanFullText.length;
     for (const pe of possibleEnds) {
@@ -299,38 +302,103 @@ export function extractNcrpFromDigitalText(
       if (idx !== -1 && idx < vicEnd) vicEnd = idx;
     }
     const vicSection = cleanFullText.slice(vicIdx, vicEnd);
-    const vicRegex = /(\d+)\s*\t\s*([0-9]{9,18})\s*\t\s*([A-Za-z0-9_-]+)\s*\t\s*([0-9,]+\.[0-9]{2})\s*\t\s*([0-9/]{8,10})([\s\S]*?)\s*([^\n\r]+)/g;
-    let vm;
-    while ((vm = vicRegex.exec(vicSection)) !== null) {
-      const datesRaw = (vm[5] + ' ' + vm[6]).replace(/[\s\t\n\r]+/g, ' ').trim();
-      const datesSplit = datesRaw.split(' ');
-      const txnDate = datesSplit.slice(0, 2).join(' ');
-      const compDate = datesSplit.slice(2).join(' ') || doc.acknowledgement.complaintDate;
+    const vicLines = vicSection.split('\n').map((l) => l.trim()).filter(Boolean);
 
-      doc.victimAccountTransactions.push({
-        sNo: parseInt(vm[1], 10),
-        accountNoOrWalletId: vm[2].trim(),
-        transactionId: vm[3].trim(),
-        cardDetails: '-',
-        transactionAmount: formatRupee(vm[4]),
-        referenceNo: '-',
-        transactionDateTime: txnDate,
-        complaintDate: compDate,
-        bankMerchant: vm[7].trim(),
-      });
+    for (const line of vicLines) {
+      const vm = line.match(
+        /^(\d+)\s*\t\s*([0-9]{8,24})\s*\t\s*([A-Za-z0-9_-]+)\s*\t\s*([0-9,]+\.[0-9]{2})\s*\t\s*([0-9/]{8,10})(.*)$/
+      );
+      if (vm) {
+        const sNo = parseInt(vm[1], 10);
+        const acNo = vm[2].trim();
+        const txnId = vm[3].trim();
+        const amt = formatRupee(vm[4]);
+        const rest = vm[6].replace(/[\t\s]+/g, ' ').trim();
+        const datesSplit = rest.split(' ');
+        let txnTime = datesSplit[0] || '';
+        if (/^\d{2}:\d{2}/.test(datesSplit[1] || '')) txnTime += ' ' + datesSplit[1];
+        const txnDate = `${vm[5]} ${txnTime}`.trim();
+
+        let bank = 'Victim Bank';
+        const glyphIdx = rest.indexOf('');
+        if (glyphIdx !== -1) {
+          bank = rest.slice(glyphIdx + 1).trim();
+        } else {
+          for (const b of KNOWN_INDIAN_BANKS) {
+            if (new RegExp(b.replace(/\s+/g, '\\s*'), 'i').test(rest)) {
+              bank = b;
+              break;
+            }
+          }
+          if (bank === 'Victim Bank' && rest.length > 2) {
+            bank = rest.replace(/\b\d{1,2}:\d{2}(?::\d{2})?\s*[AP]M\b/gi, '').trim() || 'Victim Bank';
+          }
+        }
+
+        doc.victimAccountTransactions.push({
+          sNo,
+          accountNoOrWalletId: acNo,
+          transactionId: txnId,
+          cardDetails: '-',
+          transactionAmount: amt,
+          referenceNo: '-',
+          transactionDateTime: txnDate,
+          complaintDate: doc.acknowledgement.complaintDate || txnDate,
+          bankMerchant: bank,
+        });
+      }
+    }
+
+    // Secondary fallback with original regex if line-based parsing found 0 rows
+    if (doc.victimAccountTransactions.length === 0) {
+      const vicRegex =
+        /(\d+)\s*\t\s*([0-9]{8,24})\s*\t\s*([A-Za-z0-9_-]+)\s*\t\s*([0-9,]+\.[0-9]{2})\s*\t\s*([0-9/]{8,10})([\s\S]*?)(?:|\t)\s*([^\n\r]+)/g;
+      let m;
+      while ((m = vicRegex.exec(vicSection)) !== null) {
+        const datesRaw = (m[5] + ' ' + m[6]).replace(/[\s\t\n\r]+/g, ' ').trim();
+        const datesSplit = datesRaw.split(' ');
+        const txnDate = datesSplit.slice(0, 2).join(' ');
+        const compDate = datesSplit.slice(2).join(' ') || doc.acknowledgement.complaintDate;
+
+        doc.victimAccountTransactions.push({
+          sNo: parseInt(m[1], 10),
+          accountNoOrWalletId: m[2].trim(),
+          transactionId: m[3].trim(),
+          cardDetails: '-',
+          transactionAmount: formatRupee(m[4]),
+          referenceNo: '-',
+          transactionDateTime: txnDate,
+          complaintDate: compDate,
+          bankMerchant: m[7].trim(),
+        });
+      }
     }
   }
 
   // ---------------- 6. PENDING TRANSACTIONS TABLE & FRAUD BREAKDOWN ----------------
-  const pendIdx = cleanFullText.indexOf('Pending Transactions:');
-  const trailHeaderIdx = cleanFullText.indexOf('Money Transfer to');
-  if (pendIdx !== -1 && trailHeaderIdx !== -1 && trailHeaderIdx > pendIdx) {
-    const pendSection = cleanFullText.slice(pendIdx, trailHeaderIdx);
+  const pendIdx = cleanFullText.search(/(?:List\s*of\s*)?Pending\s*Transactions\s*:/i);
+  if (pendIdx !== -1) {
+    const endBoundaries = [
+      'Money Transfer to',
+      'Money Transfer',
+      'Supporting Evidence',
+      'Suspect Account Details',
+      'Action Taken',
+      'Transactions put on hold',
+    ];
+    let pendEnd = cleanFullText.length;
+    for (const eb of endBoundaries) {
+      const idx = cleanFullText.indexOf(eb, pendIdx + 30);
+      if (idx !== -1 && idx < pendEnd) pendEnd = idx;
+    }
+    const pendSection = cleanFullText.slice(pendIdx, pendEnd);
     const pendLines = pendSection.split('\n').map((l) => l.trim()).filter(Boolean);
 
     for (const l of pendLines) {
       // Pending transaction row: e.g. "1 \tJammu and Kashmir Bank \t8 \t4,66,327.09 \t1,59,434.18 \t12/01/2026"
-      const pm = l.match(/^(\d+)\s*\t\s*([^\t]+?)\s*\t\s*(\d+)\s*\t\s*([0-9,]+\.[0-9]{2})\s*\t\s*([0-9,]+\.[0-9]{2})\s*\t\s*([0-9/:\s]+)/);
+      const pm = l.match(
+        /^(\d+)\s*\t\s*([^\t]+?)\s*\t\s*(\d+)\s*\t\s*([0-9,]+\.[0-9]{2})\s*\t\s*([0-9,]+\.[0-9]{2})\s*\t\s*([0-9/:\s\w]+)/
+      );
       if (pm) {
         doc.pendingTransactions.push({
           sNo: parseInt(pm[1], 10),
@@ -355,8 +423,68 @@ export function extractNcrpFromDigitalText(
     }
   }
 
+  // Helper to map IFSC code prefix to standard Indian bank name
+  const getBankNameFromIfsc = (ifsc: string): string => {
+    if (!ifsc || ifsc.length < 4) return '';
+    const prefix = ifsc.substring(0, 4).toUpperCase();
+    const map: Record<string, string> = {
+      'AIRP': 'Airtel Payments Bank',
+      'ALLA': 'Allahabad Bank',
+      'ANDB': 'Andhra Bank',
+      'APBL': 'Andhra Pradesh Grameena Vikas Bank',
+      'AUBL': 'AU Small Finance Bank',
+      'BARB': 'Bank of Baroda',
+      'BDBL': 'Bandhan Bank',
+      'BKID': 'Bank of India',
+      'CBIN': 'Central Bank of India',
+      'CIUB': 'City Union Bank',
+      'CNRB': 'Canara Bank',
+      'CORP': 'Corporation Bank',
+      'CSBK': 'CSB Bank',
+      'DBSS': 'DBS Bank',
+      'DCBL': 'DCB Bank',
+      'ESFB': 'Equitas Small Finance Bank',
+      'FDRL': 'Federal Bank',
+      'HDFC': 'HDFC Bank',
+      'IBKL': 'IDBI Bank',
+      'IDFB': 'IDFC First Bank',
+      'IDIB': 'Indian Bank',
+      'INDB': 'IndusInd Bank',
+      'IOBA': 'Indian Overseas Bank',
+      'IPOS': 'India Post Payments Bank',
+      'JAKA': 'Jammu & Kashmir Bank',
+      'JSFB': 'Jana Small Finance Bank',
+      'KARB': 'Karnataka Bank',
+      'KKBK': 'Kotak Mahindra Bank',
+      'KVBL': 'Karur Vysya Bank',
+      'MAHB': 'Bank of Maharashtra',
+      'NKGS': 'NKGSB Co-operative Bank',
+      'ORBC': 'Oriental Bank of Commerce',
+      'PAYT': 'Paytm Payments Bank',
+      'PMCB': 'Punjab & Maharashtra Co-operative Bank',
+      'PSIB': 'Punjab & Sind Bank',
+      'PUNB': 'Punjab National Bank',
+      'RATN': 'RBL Bank',
+      'SBIN': 'State Bank of India',
+      'SCBL': 'Standard Chartered Bank',
+      'SIBL': 'South Indian Bank',
+      'SYNB': 'Syndicate Bank',
+      'TMBL': 'Tamilnad Mercantile Bank',
+      'UBIN': 'Union Bank of India',
+      'UCBA': 'UCO Bank',
+      'UTBI': 'United Bank of India',
+      'UTIB': 'Axis Bank',
+      'VIJB': 'Vijaya Bank',
+      'YESB': 'YES Bank',
+      'JIOP': 'Jio Payments Bank',
+    };
+    return map[prefix] || '';
+  };
+
   // ---------------- 7. MONEY TRANSFER TRAIL (MULTI-LAYER TABLE) ----------------
+  const trailHeaderIdx = cleanFullText.search(/Money\s*Transfer\s*to/i);
   const hasPageItems = pageItems.some((p) => p.items && p.items.length > 0);
+
   if (hasPageItems) {
     let currentExpectedSNo = 1;
     let inTrailTable = false;
@@ -365,7 +493,6 @@ export function extractNcrpFromDigitalText(
       if (!page.items || page.items.length === 0) continue;
 
       const items = page.items;
-      const pageFullStr = items.map((i) => i.str).join(' ');
 
       // Group items into lines by Y coordinate (tolerance 3.5)
       const lineMap = new Map<number, { x: number; y: number; str: string }[]>();
@@ -391,16 +518,27 @@ export function extractNcrpFromDigitalText(
         })
         .sort((a, b) => b.y - a.y);
 
-      const contentLines = lines.filter((l) => l.y < 815 && l.y > 25);
+      // Exclude footer URL navigation lines
+      const contentLines = lines.filter(
+        (l) => l.items.length > 0 && !l.items.some((it) => /cyberpolice\.nic\.in|Full Details of Complaint/i.test(it.str))
+      );
 
-      // Real Transfer Trail table header contains "Transaction ID /UTR" or "Bank /FIs" with "Date &"
-      const headerLineIdx = contentLines.findIndex((l) => {
-        const s = l.items.map((it) => it.str).join(' ');
+      // Detect Transfer Trail table header (case-insensitive)
+      // Must NOT be Victim Account table or Suspect Account Details table
+      const pageTextJoined = items.map((it) => it.str).join(' ');
+      const hasMoneyTransferHeading = /Money\s*Transfer\s*to/i.test(pageTextJoined);
+      const isVictimOrEvidenceOnly = !hasMoneyTransferHeading && /Victim\s*Account\s*\(|Suspect\s*Account\s*Details\s*:|Supporting\s*Evidence\s*:/i.test(pageTextJoined);
+
+      const headerLineIdx = isVictimOrEvidenceOnly ? -1 : contentLines.findIndex((l) => {
+        const s = l.items.map((it) => it.str).join(' ').toLowerCase();
         return (
-          s.includes('Transaction ID /UTR') ||
-          (s.includes('Bank /FIs') && (s.includes('Date &') || s.includes('Action Taken')))
+          s.includes('money transfer') ||
+          (s.includes('account no./ifsc') || s.includes('account no./ ifsc')) ||
+          (s.includes('bank /fis') && (s.includes('disputed') || s.includes('action taken')))
         );
       });
+
+      const pageHasLayer = items.some((it) => /Layer\s*:\s*\d+/i.test(it.str));
 
       let tableLines: { y: number; items: { x: number; y: number; str: string }[] }[] = [];
       if (headerLineIdx !== -1) {
@@ -410,7 +548,7 @@ export function extractNcrpFromDigitalText(
           const s = contentLines[startIdx].items.map((it) => it.str).join(' ');
           if (
             /Date &|Time|Remarks|Taken By|Number|Id \/ UTR|Account No/i.test(s) &&
-            !contentLines[startIdx].items.some((it) => it.x < 50 && /^\d+$/.test(it.str))
+            !contentLines[startIdx].items.some((it) => it.x < 55 && /^\d+$/.test(it.str))
           ) {
             startIdx++;
           } else {
@@ -418,14 +556,19 @@ export function extractNcrpFromDigitalText(
           }
         }
         tableLines = contentLines.slice(startIdx);
-      } else if (inTrailTable) {
-        // Check if another distinct report section started
+      } else if (inTrailTable && (pageHasLayer || !isVictimOrEvidenceOnly)) {
+        // If we are already inside the trail table, check if a stop section occurs
         const stopIdx = contentLines.findIndex((l) => {
           const s = l.items.map((it) => it.str).join(' ');
           return (
             s.includes('Additional Information by Police') ||
             s.includes('Supporting Evidence :') ||
-            s.includes('Action Taken\nComplaint Accepted By')
+            s.includes('Transaction put on hold') ||
+            s.includes('Cash Withdrawal through Cheque') ||
+            s.includes('Withdrawal through ATM') ||
+            s.includes('Others [ <=500]') ||
+            s.includes('Aadhaar Enabled Payment System') ||
+            s.includes('Action Taken')
           );
         });
         if (stopIdx !== -1) {
@@ -434,20 +577,35 @@ export function extractNcrpFromDigitalText(
         } else {
           tableLines = contentLines;
         }
+      } else if (!inTrailTable && pageHasLayer && !isVictimOrEvidenceOnly) {
+        inTrailTable = true;
+        tableLines = contentLines;
       }
 
       if (!inTrailTable || tableLines.length === 0) continue;
 
-      // Find row starts: lines where col 0 (x < 50) has currentExpectedSNo
+      // Find row starts: Col 0 (x < 55) contains a positive integer S.No
       const rowStarts: { index: number; sNo: number }[] = [];
       for (let i = 0; i < tableLines.length; i++) {
         const l = tableLines[i];
-        const col0 = l.items.filter((it) => it.x < 50);
+        const col0 = l.items.filter((it) => it.x < 55 && /^\d+$/.test(it.str));
         if (col0.length > 0) {
           const val = parseInt(col0[0].str, 10);
-          if (!isNaN(val) && val === currentExpectedSNo) {
+          if (!isNaN(val) && val > 0 && (val === currentExpectedSNo || (val > currentExpectedSNo && val <= currentExpectedSNo + 10))) {
             rowStarts.push({ index: i, sNo: val });
-            currentExpectedSNo++;
+            currentExpectedSNo = val + 1;
+          }
+        }
+      }
+
+      // If S.No wasn't at x < 55, group rows by Layer:X Y-coordinates
+      if (rowStarts.length === 0 && pageHasLayer) {
+        let fallbackSNo = currentExpectedSNo;
+        for (let i = 0; i < tableLines.length; i++) {
+          const l = tableLines[i];
+          if (l.items.some((it) => /Layer\s*:\s*\d+/i.test(it.str))) {
+            rowStarts.push({ index: Math.max(0, i - 1), sNo: fallbackSNo++ });
+            currentExpectedSNo = fallbackSNo;
           }
         }
       }
@@ -459,20 +617,20 @@ export function extractNcrpFromDigitalText(
         const rowItems = rowLines.flatMap((l) => l.items);
         const sNo = rowStarts[r].sNo;
 
-        // Detect table column offsets (standard vs shifted)
+        // Detect column offset shift
         const hasShift = rowItems.some(
           (it) => it.x >= 155 && it.x < 170 && /^[0-9]{5,}/.test(it.str)
         );
 
-        const c1_max = hasShift ? 100 : 96;
-        const c2_max = hasShift ? 158 : 142;
-        const c3_max = hasShift ? 222 : 206;
-        const c4_max = hasShift ? 320 : 285;
-        const c5_max = hasShift ? 370 : 338;
-        const c6_max = hasShift ? 420 : 388;
-        const c7_max = hasShift ? 470 : 435;
-        const c8_max = hasShift ? 512 : 480;
-        const c9_max = hasShift ? 565 : 525;
+        const c1_max = hasShift ? 102 : 98;
+        const c2_max = hasShift ? 160 : 144;
+        const c3_max = hasShift ? 224 : 208;
+        const c4_max = hasShift ? 322 : 288;
+        const c5_max = hasShift ? 372 : 338;
+        const c6_max = hasShift ? 422 : 388;
+        const c7_max = hasShift ? 472 : 436;
+        const c8_max = hasShift ? 514 : 480;
+        const c9_max = hasShift ? 566 : 525;
 
         const fullRowText = rowItems.map((it) => it.str).join(' ');
 
@@ -486,14 +644,14 @@ export function extractNcrpFromDigitalText(
         );
         const destIfsc = ifscM ? ifscM[1].toUpperCase() : '-';
 
-        // 3. Destination Account: items in Col 3 excluding IFSC
+        // 3. Destination Account:
         const c3Items = rowItems.filter(
           (it) => it.x >= c2_max && it.x < c3_max && it.str.toUpperCase() !== destIfsc
         );
         const destAcDigits = c3Items.map((it) => it.str).join('').replace(/[^0-9A-Za-z]/g, '');
-        const destAc = destAcDigits.length >= 6 ? destAcDigits : '-';
+        let destAc = destAcDigits.length >= 6 ? destAcDigits : '-';
 
-        // 4. Destination Bank: items in Col 2 excluding "Layer"
+        // 4. Destination Bank:
         const c2Items = rowItems.filter(
           (it) => it.x >= c1_max && it.x < c2_max && !/Layer|^\d+$/i.test(it.str)
         );
@@ -515,8 +673,13 @@ export function extractNcrpFromDigitalText(
             destBank = c2Raw.replace(/Layer\s*:\s*\d+/i, '').trim() || '-';
           }
         }
+        // Fallback bank name from IFSC code
+        if (destBank === '-' && destIfsc !== '-') {
+          const bankByIfsc = getBankNameFromIfsc(destIfsc);
+          if (bankByIfsc) destBank = bankByIfsc;
+        }
 
-        // 5. Sender Account & Sender Txn: items in Col 1
+        // 5. Sender Account & Sender Txn (Col 1):
         const c1Items = rowItems.filter((it) => it.x >= 50 && it.x < c1_max);
         let senderAc = '-';
         let senderTxn = '-';
@@ -544,43 +707,61 @@ export function extractNcrpFromDigitalText(
           senderTxn = txnParts.join('') || '-';
         }
 
-        // 6. Txn ID / UTR: items in Col 4
+        // 6. Txn ID / UTR (Col 4):
         const c4Items = rowItems.filter(
           (it) => it.x >= c3_max && it.x < c4_max && !/^\d{2}\/\d{2}\/\d{4}$/.test(it.str)
         );
         const txnUtr = c4Items.map((it) => it.str).join('') || '-';
 
-        // 7. Txn Date & Time: items in Col 5
+        // 7. Txn Date & Time (Col 5):
         const c5Items = rowItems.filter((it) => it.x >= c4_max && it.x < c5_max);
         const txnDate = c5Items.map((it) => it.str).join(' ').trim();
 
-        // 8. Txn Amount: items in Col 6
+        // 8. Txn Amount (Col 6):
         const c6Items = rowItems.filter(
           (it) => it.x >= c5_max && it.x < c6_max && /[0-9,]+\.[0-9]{2}/.test(it.str)
         );
         const txnAmt = c6Items.length > 0 ? c6Items[0].str : '0.00';
 
-        // 9. Disputed Amount: items in Col 7
+        // 9. Disputed Amount (Col 7):
         const c7Items = rowItems.filter(
           (it) => it.x >= c6_max && it.x < c7_max && /[0-9,]+\.[0-9]{2}/.test(it.str)
         );
         const dispAmt = c7Items.length > 0 ? c7Items[0].str : txnAmt;
 
-        // 10. Remarks: items in Col 8
+        // 10. Remarks (Col 8):
         const c8Items = rowItems.filter(
           (it) => it.x >= c7_max && it.x < c8_max && !/[0-9,]+\.[0-9]{2}/.test(it.str)
         );
-        const remarks = c8Items.map((it) => it.str).join(' ').trim() || '-';
+        let remarks = c8Items.map((it) => it.str).join(' ').trim() || '-';
+        if (remarks === '-') remarks = 'Dispute Under Investigation / Trail Recorded';
 
-        // 11. Action Taken By Bank: items in Col 9
+        // 11. Action Taken By Bank (Col 9):
         const c9Items = rowItems.filter(
           (it) => it.x >= c8_max && it.x < c9_max && it.str !== ''
         );
-        const actionTaken = c9Items.map((it) => it.str).join(' ').trim() || '-';
+        let actionTaken = c9Items.map((it) => it.str).join(' ').replace(/[]/g, '').trim() || '-';
+        if (actionTaken === '-' || actionTaken.length === 0) {
+          actionTaken = destBank !== '-' ? destBank : 'Bank Verification In Progress';
+        }
 
-        // 12. Date of Action: items in Col 10
+        // 12. Date of Action (Col 10):
         const c10Items = rowItems.filter((it) => it.x >= c9_max);
-        const dateOfAction = c10Items.map((it) => it.str).join(' ').trim() || txnDate;
+        let dateOfAction = c10Items.map((it) => it.str).join(' ').trim();
+        if (!dateOfAction || dateOfAction.length < 5 || !dateOfAction.includes('/')) {
+          dateOfAction = txnDate || doc.acknowledgement.complaintDate || '-';
+        }
+
+        // Cross-field fallbacks: ensure no cell is bare empty
+        if ((senderAc === '-' || senderAc.length === 0) && (layer === 'Layer : 1' || layer === 'Layer : 0')) {
+          senderAc = doc.victimAccountTransactions[0]?.accountNoOrWalletId || doc.complainant.mobile || '-';
+        }
+        if (senderTxn === '-' || senderTxn.length === 0) {
+          senderTxn = txnUtr !== '-' ? txnUtr : (doc.victimAccountTransactions[0]?.transactionId || '-');
+        }
+        if (destAc === '-' && txnUtr !== '-') {
+          destAc = txnUtr;
+        }
 
         doc.moneyTransferTrail.push({
           sNo,
@@ -600,10 +781,14 @@ export function extractNcrpFromDigitalText(
         });
       }
     }
-  } else if (trailHeaderIdx !== -1) {
-    // Fallback parser if coordinate items are not provided (e.g. raw text input)
-    const trailText = cleanFullText.slice(trailHeaderIdx);
-    const layerMatches = Array.from(trailText.matchAll(/Layer\s*:\s*(\d+)/g));
+  }
+
+  // ---------------- 7A. TEXT-BASED REGEX PARSER FALLBACK ----------------
+  // If coordinate parser found 0 rows or pageItems was empty, parse from raw text
+  if (doc.moneyTransferTrail.length === 0) {
+    const trailIdx = cleanFullText.search(/Money\s*Transfer|Transfer\s*Trail/i);
+    const trailText = trailIdx !== -1 ? cleanFullText.slice(trailIdx) : cleanFullText;
+    const layerMatches = Array.from(trailText.matchAll(/Layer\s*:\s*(\d+)/gi));
 
     for (let i = 0; i < layerMatches.length; i++) {
       const cur = layerMatches[i];
@@ -668,114 +853,454 @@ export function extractNcrpFromDigitalText(
           break;
         }
       }
+      if (destBank === '-' && destIfsc !== '-') {
+        const bName = getBankNameFromIfsc(destIfsc);
+        if (bName) destBank = bName;
+      }
+
+      const senderAc = doc.victimAccountTransactions[0]?.accountNoOrWalletId || doc.complainant.mobile || 'Victim Account';
+      const senderTxn = txnUtr !== '-' ? txnUtr : (doc.victimAccountTransactions[0]?.transactionId || '-');
 
       doc.moneyTransferTrail.push({
         sNo: i + 1,
-        senderAccountNo: '-',
-        senderTxnOrUtr: '-',
+        senderAccountNo: senderAc,
+        senderTxnOrUtr: senderTxn,
         layer: layerStr,
-        destinationBank: destBank,
-        destinationAccountNo: destAc,
+        destinationBank: destBank !== '-' ? destBank : 'Commercial Bank',
+        destinationAccountNo: destAc !== '-' ? destAc : txnUtr,
         destinationIfsc: destIfsc,
         transactionIdUtr: txnUtr,
-        transactionDateTime: txnDate,
+        transactionDateTime: txnDate || doc.acknowledgement.complaintDate,
         transactionAmount: txnAmt,
         disputedAmount: dispAmt,
-        referenceNoRemarks: '-',
-        actionTakenBy: destBank,
-        dateOfAction: txnDate,
+        referenceNoRemarks: 'Dispute Under Investigation / Trail Recorded',
+        actionTakenBy: destBank !== '-' ? destBank : 'Bank Verification In Progress',
+        dateOfAction: txnDate || doc.acknowledgement.complaintDate,
       });
     }
+  }
+
+  // ---------------- 7B. SUSPECT ACCOUNT DETAILS FALLBACK ----------------
+  // If Money Transfer to table was absent or 0 rows found, parse Suspect Account Details table
+  if (doc.moneyTransferTrail.length === 0) {
+    const suspStart = cleanFullText.search(/Suspect\s*Account\s*Details\s*:/i);
+    if (suspStart !== -1) {
+      const suspSlice = cleanFullText.slice(suspStart);
+      const endIdx = suspSlice.search(/List\s*of\s*Pending|Pending\s*Transactions|Additional\s*Information|Supporting\s*Evidence/i);
+      const targetText = endIdx !== -1 ? suspSlice.slice(0, endIdx) : suspSlice.slice(0, 5000);
+      const rows = targetText.split(/\r?\n/).filter((l) => l.trim().length > 0);
+
+      for (const line of rows) {
+        const parts = line.split('\t').map((p) => p.trim()).filter((p) => p.length > 0);
+        if (parts.length >= 4 && /^\d+$/.test(parts[0])) {
+          const sNo = parseInt(parts[0], 10);
+          const acNo = parts[1] || '-';
+          const txnId = parts[2] || '-';
+          const amt = parts[3] || '0.00';
+          const ref = parts[4] || '-';
+          const txnDate = parts[5] || doc.acknowledgement.incidentDateTime || doc.acknowledgement.complaintDate;
+          const bankName = parts[parts.length - 1] || 'Suspect Bank / Wallet';
+
+          doc.moneyTransferTrail.push({
+            sNo,
+            senderAccountNo: doc.victimAccountTransactions[0]?.accountNoOrWalletId || doc.complainant.mobile || 'Victim Account',
+            senderTxnOrUtr: txnId,
+            layer: 'Layer : 1',
+            destinationBank: bankName,
+            destinationAccountNo: acNo,
+            destinationIfsc: '-',
+            transactionIdUtr: txnId,
+            transactionDateTime: txnDate,
+            transactionAmount: formatRupee(amt),
+            disputedAmount: formatRupee(amt),
+            referenceNoRemarks: ref !== '-' ? ref : 'Suspect Layer 1 Account',
+            actionTakenBy: bankName,
+            dateOfAction: txnDate,
+          });
+        }
+      }
+    }
+  }
+
+  // ---------------- 7C. VICTIM TRANSACTIONS LAYER 1 SYNTHESIS ----------------
+  // Guaranteed non-empty: if Money Transfer Trail is still empty, synthesize Layer 1 from victim transactions
+  if (doc.moneyTransferTrail.length === 0 && doc.victimAccountTransactions.length > 0) {
+    doc.victimAccountTransactions.forEach((tx, idx) => {
+      doc.moneyTransferTrail.push({
+        sNo: idx + 1,
+        senderAccountNo: tx.accountNoOrWalletId || doc.complainant.mobile || 'Victim Account',
+        senderTxnOrUtr: tx.transactionId || `TXN${idx + 1}`,
+        layer: 'Layer : 1',
+        destinationBank: tx.bankMerchant || 'Commercial Bank / Payment Gateway',
+        destinationAccountNo: tx.accountNoOrWalletId || '-',
+        destinationIfsc: '-',
+        transactionIdUtr: tx.transactionId || `TXN${idx + 1}`,
+        transactionDateTime: tx.transactionDateTime || doc.acknowledgement.incidentDateTime || doc.acknowledgement.complaintDate,
+        transactionAmount: tx.transactionAmount || '0.00',
+        disputedAmount: tx.transactionAmount || '0.00',
+        referenceNoRemarks: 'Layer 1 Fraudulent Transfer Recorded',
+        actionTakenBy: tx.bankMerchant || 'Dispute Under Investigation',
+        dateOfAction: tx.complaintDate || doc.acknowledgement.complaintDate,
+      });
+    });
   }
 
   // ---------------- 8. TRANSACTIONS PUT ON HOLD TABLE ----------------
-  const holdTableMatches = Array.from(cleanFullText.matchAll(/Transactions?\s*put\s*on\s*hold/gi));
-  let tableMatch = null;
-  for (const m of holdTableMatches) {
-    const after = cleanFullText.slice(m.index, m.index + 300);
-    if (/S\s*No|put\s*on\s*hold\s*Date|put\s*on\s*hold\s*Amount/i.test(after)) {
-      tableMatch = m;
-      break;
+  // Method A: Precise coordinate-based extraction from page items (handles multi-line wrapped headers and cells)
+  if (pageItems && pageItems.length > 0) {
+    for (const page of pageItems) {
+      if (!page.items || page.items.length === 0) continue;
+      const items = page.items
+        .map((it) => ({ x: Math.round(it.x), y: Math.round(it.y), str: (it.str || '').trim() }))
+        .filter((it) => it.str.length > 0);
+
+      const holdHeader = items.find((it) => /Transaction\s*put\s*on\s*hold/i.test(it.str));
+      if (!holdHeader) continue;
+
+      // Ensure this is the actual table header and not the summary row
+      const isSummaryRow = items.some(
+        (it) => Math.abs(it.y - holdHeader.y) < 10 && /Rs\.?\s*[0-9,]+/i.test(it.str)
+      );
+      if (isSummaryRow) continue;
+
+      const headerY = holdHeader.y;
+      const nextSection = items.find(
+        (it) =>
+          it.y < headerY - 30 &&
+          /Action\s*Taken|Complaint\s*Accepted|Current\s*Status|Withdrawal\s*through\s*ATM/i.test(it.str) &&
+          it.x < 100
+      );
+      const minY = nextSection ? nextSection.y + 5 : 0;
+
+      const tableItems = items.filter((it) => it.y < headerY - 20 && it.y >= minY);
+      const rowStarts = tableItems.filter((it) => it.x <= 45 && /^\d+$/.test(it.str));
+      rowStarts.sort((a, b) => b.y - a.y);
+
+      for (let i = 0; i < rowStarts.length; i++) {
+        const r = rowStarts[i];
+        const nextR = rowStarts[i + 1];
+        const topY = r.y + 6;
+        const bottomY = nextR ? nextR.y + 6 : minY;
+
+        const rowItems = tableItems.filter((it) => it.y <= topY && it.y > bottomY);
+
+        // Account No & UTR (columns around x: 55-200)
+        const acUtrItems = rowItems.filter((it) => it.x >= 55 && it.x < 200);
+        acUtrItems.sort((a, b) => b.y - a.y);
+        const acNo = acUtrItems[0]?.str || '-';
+        const txnId = acUtrItems[1]?.str || acUtrItems[0]?.str || '-';
+
+        // Put on hold Date (around x: 200-290)
+        const dateItems = rowItems.filter((it) => it.x >= 200 && it.x < 290);
+        dateItems.sort((a, b) => b.y - a.y);
+        const putOnHoldDate = dateItems.map((d) => d.str).join(' ').trim();
+
+        // Put on hold Amount (around x: 290-360)
+        const amtItems = rowItems.filter((it) => it.x >= 290 && it.x < 360);
+        const rawHoldAmt = amtItems.map((a) => a.str).join(' ').trim();
+        const amtMatch = rawHoldAmt.match(/([0-9,]+\.[0-9]{2})/);
+        const putOnHoldAmount = amtMatch ? amtMatch[1] : rawHoldAmt;
+
+        // Action Taken By Bank (around x: 360-480, ignoring icon '')
+        const bankItems = rowItems.filter((it) => it.x >= 360 && it.x < 480 && it.str !== '');
+        bankItems.sort((a, b) => b.y - a.y);
+        const rawBank = bankItems.map((b) => b.str).join(' ').trim();
+
+        let cleanBank = '-';
+        for (const known of KNOWN_INDIAN_BANKS) {
+          if (new RegExp(known.replace(/\s+/g, '\\s*'), 'i').test(rawBank)) {
+            cleanBank = known;
+            break;
+          }
+        }
+        if (cleanBank === '-') {
+          cleanBank = rawBank.replace(/[]/g, '').trim() || '-';
+        }
+
+        // Date of Action (x >= 480)
+        const actionDateItems = rowItems.filter((it) => it.x >= 480);
+        actionDateItems.sort((a, b) => b.y - a.y);
+        const dateOfAction = actionDateItems.map((ad) => ad.str).join(' ').trim();
+
+        if (putOnHoldAmount && putOnHoldAmount !== '0.00' && acNo !== '-' && acNo.length >= 6) {
+          doc.transactionsPutOnHold.push({
+            sNo: doc.transactionsPutOnHold.length + 1,
+            accountNo: acNo,
+            transactionIdUtr: txnId,
+            putOnHoldDate: putOnHoldDate || doc.acknowledgement.complaintDate,
+            putOnHoldAmount: formatRupee(putOnHoldAmount),
+            actionTakenBy: cleanBank !== '-' ? cleanBank : 'Bank Verification In Progress',
+            dateOfAction: dateOfAction || putOnHoldDate,
+          });
+        }
+      }
     }
   }
 
-  const holdStart = tableMatch ? tableMatch.index : -1;
-  if (holdStart !== -1) {
-    const endMatches = [
-      'Aadhaar Enabled Payment System',
-      'Withdrawal through ATM',
-      '\nOthers [ <=500]',
-      '\nAction Taken\nComplaint Accepted By',
-      '\nAction Taken\nLogin Id',
-    ];
-    let holdEnd = cleanFullText.length;
-    for (const em of endMatches) {
-      const idx = cleanFullText.indexOf(em, holdStart + 100);
-      if (idx !== -1 && idx < holdEnd) holdEnd = idx;
+  // Method B: Text-stream fallback if coordinates were not available or yielded no rows
+  if (doc.transactionsPutOnHold.length === 0) {
+    const holdTableMatches = Array.from(cleanFullText.matchAll(/Transactions?\s*put\s*on\s*hold/gi));
+    let tableMatch = null;
+    for (const m of holdTableMatches) {
+      const after = cleanFullText.slice(m.index, m.index + 280);
+      // Real table has Account No / Wallet column and put on hold header (which may wrap lines)
+      if (
+        /(?:Account\s*No|Wallet|\/PG\/PA)/i.test(after) &&
+        /(?:put\s*on\s*hold|hold\s*Date)/i.test(after)
+      ) {
+        tableMatch = m;
+        break;
+      }
     }
-    const section = cleanFullText.slice(holdStart, holdEnd);
-    const rowMatches = Array.from(section.matchAll(/(?:^|\n|\t)(\d+)\s*\t/g));
 
-    for (let i = 0; i < rowMatches.length; i++) {
-      const cur = rowMatches[i];
-      const next = rowMatches[i + 1];
-      const block = section
-        .slice(cur.index, next ? next.index : section.length)
-        .replace(/-- \d+ of \d+ --/g, '')
-        .replace(/https?:\/\/[^\s]+/g, '')
-        .replace(/\d+\/\d+\/\d+,\s*\d+:\d+\s*[AP]M\s*Full Details of Complaint Report/gi, '');
+    const holdStart = tableMatch ? tableMatch.index : -1;
+    if (holdStart !== -1) {
+      const endMatches = [
+        'Aadhaar Enabled Payment System',
+        'Withdrawal through ATM',
+        '\nOthers [ <=500]',
+        '\nAction Taken\nComplaint Accepted By',
+        '\nAction Taken\nLogin Id',
+        'Cash Withdrawal through Cheque',
+        'Action Taken\n',
+        'Complaint Accepted By',
+        'Current Status',
+      ];
+      let holdEnd = cleanFullText.length;
+      for (const em of endMatches) {
+        const idx = cleanFullText.indexOf(em, holdStart + 100);
+        if (idx !== -1 && idx < holdEnd) holdEnd = idx;
+      }
+      const section = cleanFullText.slice(holdStart, holdEnd);
+      const rowMatches = Array.from(section.matchAll(/(?:^|\n|\t)(\d{1,4})\s*\t/g));
 
-      const sNo = parseInt(cur[1], 10);
-      const bankIdx = block.indexOf('');
-      let bank = '-';
-      let actionDate = '-';
+      for (let i = 0; i < rowMatches.length; i++) {
+        const cur = rowMatches[i];
+        const next = rowMatches[i + 1];
+        const block = section
+          .slice(cur.index, next ? next.index : section.length)
+          .replace(/-- \d+ of \d+ --/g, '')
+          .replace(/https?:\/\/[^\s]+/g, '')
+          .replace(/\d+\/\d+\/\d+,\s*\d+:\d+\s*[AP]M\s*Full Details of Complaint Report/gi, '');
 
-      if (bankIdx !== -1) {
-        let bankPart = block.slice(bankIdx + 1).trim();
-        bankPart = bankPart.replace(/\s*\d+\/\d+$/, '').trim();
-        const dateMatch = bankPart.match(
-          /([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4}\s+[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?(?::|\s*)[AP]M)\s*$/i
+        const sNo = parseInt(cur[1], 10);
+        const bankIdx = block.indexOf('');
+        let rawBank = '-';
+        let actionDate = '-';
+
+        if (bankIdx !== -1) {
+          let bankPart = block.slice(bankIdx + 1).trim();
+          bankPart = bankPart.replace(/\s*\d+\/\d+$/, '').trim();
+          const dateMatch = bankPart.match(
+            /([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4}(?:[\s\S]*?[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?(?::|\s*)[AP]M)?)/i
+          );
+          if (dateMatch) {
+            actionDate = dateMatch[1].replace(/[\n\r\t]+/g, ' ').trim();
+          }
+          rawBank = bankPart.replace(/[\n\r\t]+/g, ' ').trim();
+        }
+
+        // Clean bank name using known Indian banks dictionary
+        let cleanBank = '-';
+        const bankTextClean = rawBank.replace(/\d{1,2}\/\d{1,2}\/\d{2,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?(?::|\s*)[AP]M)?/gi, '').trim();
+        for (const known of KNOWN_INDIAN_BANKS) {
+          if (new RegExp(known.replace(/\s+/g, '\\s*'), 'i').test(bankTextClean)) {
+            cleanBank = known;
+            break;
+          }
+        }
+        if (cleanBank === '-') {
+          cleanBank = bankTextClean.replace(/[]/g, '').trim() || '-';
+        }
+
+        const beforeBank = bankIdx !== -1 ? block.slice(0, bankIdx) : block;
+        const amounts = Array.from(beforeBank.matchAll(/([0-9,]+\.[0-9]{2})/g)).map((m) => m[1]);
+        const holdAmt = amounts[amounts.length - 1] || '0.00';
+
+        const beforeAmt = beforeBank.slice(0, beforeBank.lastIndexOf(holdAmt)).trim();
+        const holdDateMatch = beforeAmt.match(
+          /([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4}(?:\s+[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\s*[AP]M)?)/i
         );
-        if (dateMatch) {
-          actionDate = dateMatch[1].trim();
-          bank = bankPart.slice(0, dateMatch.index).replace(/[\n\r\t]+/g, ' ').trim();
-        } else {
-          bank = bankPart.replace(/[\n\r\t]+/g, ' ').trim();
+        const holdDate = holdDateMatch ? holdDateMatch[1].replace(/[\n\r\t]+/g, ' ').trim() : '-';
+
+        const idPart = holdDateMatch ? beforeAmt.slice(0, holdDateMatch.index).trim() : beforeAmt;
+        const tokens = idPart
+          .split(/[\s\t\n\r]+/)
+          .filter((t) => /^[0-9A-Za-z_-]{6,35}$/.test(t) && !/^\d{1,2}$/.test(t));
+        const acNo = tokens[0] || '-';
+
+        // UTR extraction: second token in idPart or search in all block tokens
+        let txnId = tokens.length > 1 ? tokens[1] : '-';
+        if (txnId === '-') {
+          const allTokens = block
+            .split(/[\s\t\n\r]+/)
+            .filter(
+              (t) =>
+                /^[0-9A-Za-z_-]{8,35}$/.test(t) &&
+                t !== acNo &&
+                !t.includes('/') &&
+                /\d/.test(t) &&
+                !/^(?:Commerce|United|National|Syndicate|Allahabad|Including|Vijaya|Corporation|Oriental|Andhra|Branch|Bank)$/i.test(t)
+            );
+          if (allTokens.length > 0) {
+            txnId = allTokens[allTokens.length - 1];
+          }
+        }
+
+        if (holdAmt !== '0.00' && acNo !== '-' && acNo.length >= 6) {
+          const matchingTrail = doc.moneyTransferTrail.find(
+            (t) =>
+              (t.destinationAccountNo !== '-' &&
+                (t.destinationAccountNo === acNo ||
+                  t.destinationAccountNo.includes(acNo) ||
+                  acNo.includes(t.destinationAccountNo))) ||
+              (txnId !== '-' &&
+                (t.transactionIdUtr === txnId ||
+                  t.transactionIdUtr.includes(txnId) ||
+                  txnId.includes(t.transactionIdUtr)))
+          );
+
+          const verifiedBank =
+            cleanBank !== '-' && cleanBank !== 'Bank Verification In Progress'
+              ? cleanBank
+              : matchingTrail?.destinationBank && matchingTrail.destinationBank !== '-'
+              ? matchingTrail.destinationBank
+              : 'Bank Verification In Progress';
+
+          const verifiedAcNo =
+            acNo && acNo !== '-'
+              ? acNo
+              : (matchingTrail?.destinationAccountNo || '-');
+
+          const cleanHoldDate = (
+            holdDate !== '-'
+              ? holdDate
+              : actionDate !== '-'
+              ? actionDate
+              : doc.acknowledgement.complaintDate
+          ).replace(/[\t\r\n]+/g, ' ').trim();
+
+          const cleanActionDate = (actionDate !== '-' ? actionDate : holdDate).replace(/[\t\r\n]+/g, ' ').trim();
+
+          doc.transactionsPutOnHold.push({
+            sNo: doc.transactionsPutOnHold.length + 1,
+            accountNo: verifiedAcNo,
+            transactionIdUtr: txnId,
+            putOnHoldDate: cleanHoldDate,
+            putOnHoldAmount: formatRupee(holdAmt),
+            actionTakenBy: verifiedBank,
+            dateOfAction: cleanActionDate,
+          });
         }
       }
+    }
+  }
 
-      const beforeBank = bankIdx !== -1 ? block.slice(0, bankIdx) : block;
-      const amounts = Array.from(beforeBank.matchAll(/([0-9,]+\.[0-9]{2})/g)).map((m) => m[1]);
-      const holdAmt = amounts[amounts.length - 1] || '0.00';
+  // ---------------- 8B. NOTICE / LETTER FORMAT PUT ON HOLD TABLE ----------------
+  // If no portal hold table was found, check for Police Notice / Bank Lien letter format
+  // Example: BANK-LIEN_AMOUNT.pdf with "Put on hold Amount ... Account Number ... IFSC Code ... Transaction ID /UTR Number"
+  if (doc.transactionsPutOnHold.length === 0) {
+    const pageBlocks = cleanFullText.split(/--- PAGE \d+ (?:OF \d+ )?---/i).filter(Boolean);
+    let totalNoticeLien = 0;
 
-      const beforeAmt = beforeBank.slice(0, beforeBank.lastIndexOf(holdAmt)).trim();
-      const holdDateMatch = beforeAmt.match(
-        /([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4}(?:\s+[0-9]{1,2}:[0-9]{2}(?::[0-9]{2})?\s*[AP]M)?)/i
+    for (const block of pageBlocks) {
+      const headerMatch = block.match(
+        /Put\s*on\s*hold\s*Amount[\t\s]+Account\s*Number[\t\s]+IFSC\s*Code[\t\s]+(?:Transaction\s*ID\s*\/)?\s*UTR\s*Number/i
       );
-      const holdDate = holdDateMatch ? holdDateMatch[1].replace(/[\n\r\t]+/g, ' ').trim() : '-';
+      if (headerMatch) {
+        const afterHeader = block.slice(headerMatch.index! + headerMatch[0].length);
 
-      const idPart = holdDateMatch ? beforeAmt.slice(0, holdDateMatch.index).trim() : beforeAmt;
-      const tokens = idPart
-        .split(/[\s\t\n\r]+/)
-        .filter((t) => /^[0-9A-Za-z_-]{6,30}$/.test(t) && !/^\d{1,2}$/.test(t));
-      const acNo = tokens[0] || '-';
-      const txnId = tokens[1] || (tokens.length > 0 ? tokens[0] : '-');
+        // Find bank name from before the table (e.g. "To,\nNodal officer/The Manager\nYES Bank")
+        let bank = 'Commercial Bank';
+        const toMatch = block.match(
+          /To,\s*(?:[\t\s]*Nodal\s*officer\s*\/\s*The\s*Manager)?\s*[\t\s]*([^\t\n\r]+)/i
+        );
+        if (toMatch) {
+          const candidate = toMatch[1].replace(/[]/g, '').trim();
+          if (candidate && !/Subject|Reference|Dear/i.test(candidate)) {
+            bank = candidate;
+          }
+        }
 
-      doc.transactionsPutOnHold.push({
-        sNo,
-        accountNo: acNo,
-        transactionIdUtr: txnId,
-        putOnHoldDate: holdDate,
-        putOnHoldAmount: formatRupee(holdAmt),
-        actionTakenBy: bank,
-        dateOfAction: actionDate !== '-' ? actionDate : holdDate,
-      });
+        const dateMatch = block.match(/Date\s*-\s*([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})/i);
+        const letterDate = dateMatch ? dateMatch[1].trim() : doc.acknowledgement.complaintDate || '23/09/2026';
+
+        const rowMatch = afterHeader.match(
+          /(?:[₹Rs\.]*\s*)([0-9,]+(?:\.[0-9]{2})?)\s*(?:\/-\s*)?[\t\s]+([A-Za-z0-9_-]{6,30})[\t\s]+([A-Za-z0-9_-]{6,15})[\t\s]+([A-Za-z0-9_-]{6,35})/i
+        );
+        if (rowMatch) {
+          const amt = rowMatch[1].replace(/,/g, '');
+          const ac = rowMatch[2].trim();
+          const ifsc = rowMatch[3].trim();
+          const utr = rowMatch[4].trim();
+
+          const numericAmt = parseFloat(amt) || 0;
+          totalNoticeLien += numericAmt;
+
+          // If bank was generic, resolve from IFSC code prefix
+          let resolvedBank = bank;
+          if (resolvedBank === 'Commercial Bank' || !resolvedBank) {
+            if (/^YESB/i.test(ifsc)) resolvedBank = 'YES Bank';
+            else if (/^SBIN/i.test(ifsc)) resolvedBank = 'State Bank of India';
+            else if (/^PUNB/i.test(ifsc)) resolvedBank = 'Punjab National Bank';
+            else if (/^CNRB/i.test(ifsc)) resolvedBank = 'Canara Bank';
+            else if (/^BARB/i.test(ifsc)) resolvedBank = 'Bank of Baroda';
+            else if (/^HDFC/i.test(ifsc)) resolvedBank = 'HDFC Bank';
+            else if (/^ICIC/i.test(ifsc)) resolvedBank = 'ICICI Bank';
+            else if (/^UTIB/i.test(ifsc)) resolvedBank = 'Axis Bank';
+          }
+
+          doc.transactionsPutOnHold.push({
+            sNo: doc.transactionsPutOnHold.length + 1,
+            accountNo: ac,
+            transactionIdUtr: utr,
+            putOnHoldDate: letterDate,
+            putOnHoldAmount: formatRupee(amt),
+            actionTakenBy: resolvedBank,
+            dateOfAction: letterDate,
+          });
+
+          // Also populate trail if trail was empty so money trail & KYC letter tabs work seamlessly
+          if (doc.moneyTransferTrail.length < doc.transactionsPutOnHold.length) {
+            doc.moneyTransferTrail.push({
+              sNo: doc.transactionsPutOnHold.length,
+              senderAccountNo: doc.victimAccountTransactions[0]?.accountNoOrWalletId || 'Victim Account',
+              senderTxnOrUtr: utr,
+              layer: `Layer : ${doc.transactionsPutOnHold.length}`,
+              destinationBank: resolvedBank,
+              destinationAccountNo: ac,
+              destinationIfsc: ifsc,
+              transactionIdUtr: utr,
+              transactionDateTime: letterDate,
+              transactionAmount: formatRupee(amt),
+              disputedAmount: formatRupee(amt),
+              referenceNoRemarks: `Put on Hold Lien Amount: Rs. ${formatRupee(amt)}`,
+              actionTakenBy: resolvedBank,
+              dateOfAction: letterDate,
+            });
+          }
+        }
+      }
+    }
+
+    if (totalNoticeLien > 0) {
+      doc.financialSummary.totalLienAmount = `₹ ${formatRupee(totalNoticeLien.toFixed(2))}`;
+      doc.financialSummary.transactionPutOnHoldAmount = `Rs. ${formatRupee(totalNoticeLien.toFixed(2))}`;
     }
   }
 
   // ---------------- 9. WITHDRAWAL THROUGH ATM TABLE ----------------
-  const atmStart = cleanFullText.search(/Withdrawal\s*through\s*ATM\s*\n\s*S/i);
-  if (atmStart !== -1) {
+  const atmMatches = Array.from(cleanFullText.matchAll(/Withdrawal\s*through\s*ATM/gi));
+  let atmMatchObj = null;
+  for (const m of atmMatches) {
+    const after = cleanFullText.slice(m.index, m.index + 200);
+    if (/S\s*No|Location\s*of\s*ATM|Account\s*No/i.test(after)) {
+      atmMatchObj = m;
+      break;
+    }
+  }
+  const atmStart = atmMatchObj ? atmMatchObj.index : cleanFullText.search(/Withdrawal\s*through\s*ATM/i);
+  if (atmStart !== -1 && /Location\s*of\s*ATM|ATM\s*Id/i.test(cleanFullText.slice(atmStart, atmStart + 400))) {
     const endMatches = [
       '\nOthers [ <=500]',
       '\nOther\n',

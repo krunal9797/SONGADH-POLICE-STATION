@@ -103,25 +103,32 @@ export const BankVerificationLetterGenerator: React.FC<Props> = ({
     return customBankNames[target.id] !== undefined ? customBankNames[target.id] : target.bankName;
   };
 
-  // Build target list from transactionsPutOnHold & moneyTransferTrail
+  // Build target list from genuine transactionsPutOnHold AND all KYC / money transfer trail banks
   const letterTargets: BankLetterTarget[] = useMemo(() => {
     const list: BankLetterTarget[] = [];
     const seen = new Set<string>();
 
-    // 1. First priority: transactionsPutOnHold
+    // 1. Confirmed holds from uploaded document (tagged in portal)
     if (doc.transactionsPutOnHold && doc.transactionsPutOnHold.length > 0) {
       doc.transactionsPutOnHold.forEach((hold, idx) => {
-        // Find matching IFSC or Bank name in moneyTransferTrail
         const matchingTrail = doc.moneyTransferTrail.find(
           (t) =>
-            t.destinationAccountNo === hold.accountNo ||
-            t.transactionIdUtr === hold.transactionIdUtr
+            (hold.accountNo && hold.accountNo !== '-' && (
+              t.destinationAccountNo === hold.accountNo ||
+              t.destinationAccountNo.includes(hold.accountNo) ||
+              hold.accountNo.includes(t.destinationAccountNo)
+            )) ||
+            (hold.transactionIdUtr && hold.transactionIdUtr !== '-' && (
+              t.transactionIdUtr === hold.transactionIdUtr ||
+              t.transactionIdUtr.includes(hold.transactionIdUtr) ||
+              hold.transactionIdUtr.includes(t.transactionIdUtr)
+            ))
         );
 
         const rawBank = (hold.actionTakenBy || matchingTrail?.destinationBank || '').trim();
-        const accountNo = (hold.accountNo || matchingTrail?.destinationAccountNo || '-').trim();
+        const accountNo = (hold.accountNo && hold.accountNo !== '-' ? hold.accountNo : matchingTrail?.destinationAccountNo || '-').trim();
         const ifsc = (matchingTrail?.destinationIfsc || '').trim();
-        const utr = (hold.transactionIdUtr || matchingTrail?.transactionIdUtr || '-').trim();
+        const utr = (hold.transactionIdUtr && hold.transactionIdUtr !== '-' ? hold.transactionIdUtr : matchingTrail?.transactionIdUtr || '-').trim();
 
         const resolvedBank = resolveEntityOrBank(
           rawBank,
@@ -149,68 +156,36 @@ export const BankVerificationLetterGenerator: React.FC<Props> = ({
       });
     }
 
-    // 2. If no transactionsPutOnHold records found, check trail records with lien/hold remarks
+    // 2. Only if NO confirmed holds exist in the report, allow selecting from KYC / trail accounts
     if (list.length === 0 && doc.moneyTransferTrail && doc.moneyTransferTrail.length > 0) {
       doc.moneyTransferTrail.forEach((trail, idx) => {
-        const remarks = (trail.referenceNoRemarks || '').toLowerCase();
-        const isHoldOrLien = remarks.includes('hold') || remarks.includes('lien');
-
-        if (isHoldOrLien) {
-          const rawBank = (trail.destinationBank || trail.actionTakenBy || '').trim();
-          const accountNo = (trail.destinationAccountNo || trail.senderAccountNo || '-').trim();
-          const resolvedBank = resolveEntityOrBank(rawBank, accountNo, trail.referenceNoRemarks);
-          const key = `${resolvedBank}-${accountNo}`;
-
-          if (!seen.has(key)) {
-            seen.add(key);
-            let amt = trail.disputedAmount || trail.transactionAmount || '0.00';
-            if (!amt.startsWith('₹')) amt = `₹${amt}`;
-            if (!amt.endsWith('/-')) amt = `${amt}/-`;
-
-            list.push({
-              id: `trail-hold-${idx + 1}`,
-              bankName: resolvedBank,
-              accountNumber: accountNo,
-              ifscCode: trail.destinationIfsc || '',
-              accountHolderName: '',
-              transactionId: trail.transactionIdUtr || '-',
-              holdAmount: amt,
-              dateOfHold: trail.dateOfAction || letterDate,
-            });
-          }
-        }
-      });
-    }
-
-    // 3. Fallback: if no hold records were explicitly tagged, use unique destination accounts / banks from moneyTransferTrail
-    if (list.length === 0 && doc.moneyTransferTrail && doc.moneyTransferTrail.length > 0) {
-      doc.moneyTransferTrail.slice(0, 50).forEach((trail, idx) => {
         const rawBank = (trail.destinationBank || trail.actionTakenBy || '').trim();
         const accountNo = (trail.destinationAccountNo || trail.senderAccountNo || '-').trim();
+        const utr = (trail.transactionIdUtr || trail.senderTxnOrUtr || '-').trim();
         if (accountNo === '-' && rawBank === '-') return;
 
-        const resolvedBank = resolveEntityOrBank(rawBank, accountNo, trail.referenceNoRemarks);
-        const key = `${resolvedBank}-${accountNo}`;
+        const resolvedBank = resolveEntityOrBank(rawBank, accountNo, trail.referenceNoRemarks || utr);
+        if (!resolvedBank) return;
 
+        const key = `${resolvedBank}-${accountNo}-${utr}`;
         if (!seen.has(key)) {
           seen.add(key);
-          let amt =
-            trail.disputedAmount ||
-            trail.transactionAmount ||
-            doc.financialSummary.transactionPutOnHoldAmount ||
-            '0.00';
-          if (!amt.startsWith('₹') && !amt.startsWith('Rs.')) amt = `₹ ${amt}`;
-          if (!amt.endsWith('/-')) amt = `${amt}/-`;
+          // Use exact trail disputed/transaction amount
+          let rawAmt = (trail.disputedAmount && trail.disputedAmount !== '0.00' && trail.disputedAmount !== '-'
+            ? trail.disputedAmount
+            : (trail.transactionAmount && trail.transactionAmount !== '-' ? trail.transactionAmount : '0.00')
+          ).replace(/^(?:Rs\.?|₹)\s*/i, '').trim();
+          let amt = `₹ ${rawAmt}/-`;
 
           list.push({
             id: `trail-${idx + 1}`,
             bankName: resolvedBank,
             accountNumber: accountNo,
-            ifscCode: trail.destinationIfsc || '',
+            ifscCode: trail.destinationIfsc !== '-' ? (trail.destinationIfsc || '') : '',
             accountHolderName: '',
-            transactionId: trail.transactionIdUtr || '-',
+            transactionId: utr,
             holdAmount: amt,
-            dateOfHold: trail.dateOfAction || letterDate,
+            dateOfHold: trail.dateOfAction || trail.transactionDateTime || letterDate,
           });
         }
       });
@@ -480,45 +455,67 @@ ${officerPhone}`;
           </div>
         </div>
 
-        {/* Bank Selection Tabs */}
+        {/* Bank Selection Tabs & Dropdown */}
         {letterTargets.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 pt-1">
-            <span className="text-xs text-slate-500 font-semibold flex items-center gap-1">
-              <Building2 className="w-3.5 h-3.5 text-slate-500" />
-              <span>{isGu ? 'બેંક પસંદ કરો:' : 'Select Bank:'}</span>
-            </span>
-            <button
-              onClick={() => setSelectedBankId('all')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                selectedBankId === 'all'
-                  ? 'bg-slate-900 text-white shadow-xs'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-              }`}
-            >
-              {isGu ? `તમામ લેટર્સ (${letterTargets.length})` : `All Letters (${letterTargets.length})`}
-            </button>
-            {letterTargets.map((t, idx) => {
-              const tOutward = getTargetOutwardNo(t.id, idx);
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setSelectedBankId(t.id)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                    selectedBankId === t.id
-                      ? 'bg-emerald-600 text-white shadow-xs font-bold'
-                      : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
-                  }`}
+          <div className="space-y-2 pt-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-700 font-bold flex items-center gap-1">
+                  <Building2 className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>{isGu ? 'KYC / હોલ્ડ બેંક પસંદ કરો:' : 'Select KYC / Hold Bank:'}</span>
+                </span>
+                <select
+                  value={selectedBankId}
+                  onChange={(e) => setSelectedBankId(e.target.value)}
+                  className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-slate-800 focus:ring-2 focus:ring-emerald-500 shadow-xs max-w-xs sm:max-w-md"
                 >
-                  <span>{getEffectiveBankName(t)}</span>
-                  <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-black/10">
-                    #{tOutward}
-                  </span>
-                  <span className="text-[10px] opacity-80 font-mono">
-                    ({t.holdAmount})
-                  </span>
-                </button>
-              );
-            })}
+                  <option value="all">
+                    {isGu ? `તમામ બેંક લેટર્સ દર્શાવો (${letterTargets.length})` : `Show All Bank Letters (${letterTargets.length})`}
+                  </option>
+                  {letterTargets.map((t, idx) => (
+                    <option key={t.id} value={t.id}>
+                      {idx + 1}. {getEffectiveBankName(t)} — A/C: {t.accountNumber} ({t.holdAmount})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <span className="text-[11px] text-slate-500 font-medium">
+                {isGu ? `કુલ ઉપલબ્ધ બેંકો: ${letterTargets.length}` : `Total available banks: ${letterTargets.length}`}
+              </span>
+            </div>
+
+            {/* Quick Filter Badges */}
+            <div className="flex flex-wrap items-center gap-1.5 max-h-24 overflow-y-auto p-1 bg-slate-50/50 rounded-lg border border-slate-200">
+              <button
+                onClick={() => setSelectedBankId('all')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition cursor-pointer ${
+                  selectedBankId === 'all'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                {isGu ? `બધા (${letterTargets.length})` : `All (${letterTargets.length})`}
+              </button>
+              {letterTargets.map((t, idx) => {
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setSelectedBankId(t.id)}
+                    className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition cursor-pointer flex items-center gap-1 ${
+                      selectedBankId === t.id
+                        ? 'bg-emerald-600 text-white shadow-xs font-bold'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>{getEffectiveBankName(t)}</span>
+                    <span className="text-[9.5px] opacity-75 font-mono">
+                      ({t.holdAmount})
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>

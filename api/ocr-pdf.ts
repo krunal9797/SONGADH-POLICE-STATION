@@ -11,7 +11,7 @@ export const config = {
 };
 
 // Pure JavaScript PDF text extractor statically bundled for Vercel Serverless
-async function extractDigitalPdfInNode(buffer: Buffer): Promise<{ text: string; pages: { num: number; text: string }[] }> {
+export async function extractDigitalPdfInNode(buffer: Buffer): Promise<{ text: string; pages: { num: number; text: string; items?: { x: number; y: number; str: string }[] }[] }> {
   const data = new Uint8Array(buffer);
   const doc = await pdfjsLib.getDocument({
     data,
@@ -20,19 +20,22 @@ async function extractDigitalPdfInNode(buffer: Buffer): Promise<{ text: string; 
   }).promise;
 
   let fullText = '';
-  const pages: { num: number; text: string }[] = [];
+  const pages: { num: number; text: string; items?: { x: number; y: number; str: string }[] }[] = [];
 
   for (let i = 1; i <= doc.numPages; i++) {
     try {
       const page = await doc.getPage(i);
       const content = await page.getTextContent();
       const lines: { y: number; items: { x: number; str: string }[] }[] = [];
+      const pageItems: { x: number; y: number; str: string }[] = [];
 
       for (const rawItem of content.items as any[]) {
         const str = (rawItem.str || '').trim();
         if (!str) continue;
-        const x = rawItem.transform ? rawItem.transform[4] : 0;
-        const y = rawItem.transform ? rawItem.transform[5] : 0;
+        const x = Math.round(rawItem.transform ? rawItem.transform[4] : 0);
+        const y = Math.round(rawItem.transform ? rawItem.transform[5] : 0);
+        pageItems.push({ x, y, str });
+
         let line = lines.find((l) => Math.abs(l.y - y) <= 3.5);
         if (!line) {
           line = { y, items: [] };
@@ -48,10 +51,10 @@ async function extractDigitalPdfInNode(buffer: Buffer): Promise<{ text: string; 
       });
 
       const pageText = lineStrings.join('\n');
-      pages.push({ num: i, text: pageText });
+      pages.push({ num: i, text: pageText, items: pageItems });
       fullText += '\n' + pageText;
     } catch (_) {
-      pages.push({ num: i, text: '' });
+      pages.push({ num: i, text: '', items: [] });
     }
   }
 

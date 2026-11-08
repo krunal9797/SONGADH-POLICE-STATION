@@ -195,45 +195,142 @@ app.post('/api/auth/send-otp', async (req: Request, res: Response) => {
   }
 });
 
-// Route: Primary Officer Login (Username: krunal9797, Password: 7997)
+// In-memory server-side user registry synced with client
+interface ServerUserRecord {
+  id: string;
+  username: string;
+  password: string;
+  name: string;
+  email: string;
+  phone: string;
+  policeStation: string;
+  role: string;
+  plan: string;
+  monthlyFee: number;
+  paymentStatus: string;
+  paymentExpiryDate: string;
+  transactionUtr: string;
+  paymentMethod: string;
+  isActive: boolean;
+}
+
+const serverUsers = new Map<string, ServerUserRecord>();
+const serverPayments: any[] = [];
+
+// Seed default users
+serverUsers.set('krunal9797', {
+  id: 'user_krunal_admin',
+  username: 'krunal9797',
+  password: '7997',
+  name: 'Er. Krunal Gamit (Admin)',
+  email: 'gamitkrunal7997@gmail.com',
+  phone: '+917043311587',
+  policeStation: 'Songadh Police Station, Dist. Tapi',
+  role: 'admin',
+  plan: 'monthly',
+  monthlyFee: 199,
+  paymentStatus: 'paid',
+  paymentExpiryDate: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+  transactionUtr: 'ADMIN_LIFETIME_PASS',
+  paymentMethod: 'UPI',
+  isActive: true,
+});
+
+// Route: Primary Officer Login (Username: krunal9797 or created user)
 app.post('/api/auth/login', async (req: Request, res: Response) => {
   try {
-    const username = (req.body?.username || '').trim();
+    const rawUsername = (req.body?.username || '').trim();
     const password = (req.body?.password || '').trim();
+    const lowerUser = rawUsername.toLowerCase();
 
-    const isValidUser =
-      username.toLowerCase() === 'krunal9797' ||
-      username.toLowerCase() === 'gamitkrunal7997@gmail.com';
-    const isValidPass = password === '7997';
-
-    if (!isValidUser || !isValidPass) {
-      return res.status(401).json({
-        success: false,
-        error: 'ખોટો યુઝરનેમ અથવા પાસવર્ડ! કૃપા કરીને સાચી વિગત દાખલ કરો.',
+    // 1. Admin Master Check: krunal9797 / 7997
+    if (
+      (lowerUser === 'krunal9797' || lowerUser === 'gamitkrunal7997@gmail.com') &&
+      password === '7997'
+    ) {
+      const token = 'police_auth_' + Buffer.from(`krunal9797:${Date.now()}:${Math.random()}`).toString('hex');
+      const officerProfile = {
+        username: 'krunal9797',
+        email: 'gamitkrunal7997@gmail.com',
+        name: 'Er. Krunal Gamit (Admin)',
+        role: 'Cyber Crime Super Admin',
+        station: 'Songadh Police Station, Dist. Tapi',
+        phone: '+917043311587',
+        loginTime: Date.now(),
+        plan: 'monthly',
+      };
+      activeSessions.set(token, officerProfile);
+      return res.json({
+        success: true,
+        message: 'સફળતાપૂર્વક લૉગિન થયું!',
+        token,
+        user: officerProfile,
       });
     }
 
-    const token = 'police_auth_' + Buffer.from(`${username}:${Date.now()}:${Math.random()}`).toString('hex');
-    const officerProfile = {
-      username: 'krunal9797',
-      email: 'gamitkrunal7997@gmail.com',
-      name: 'Er. Krunal Gamit',
-      role: 'Cyber Crime Investigation Officer',
-      station: 'Songadh Police Station, Dist. Tapi',
-      phone: '+917043311587',
-      loginTime: Date.now(),
-    };
+    // 2. Check in dynamic registered users
+    const matched = serverUsers.get(lowerUser);
+    if (matched) {
+      if (matched.password !== password) {
+        return res.status(401).json({
+          success: false,
+          error: 'ખોટો પાસવર્ડ! કૃપા કરીને સાચો પાસવર્ડ દાખલ કરો.',
+        });
+      }
 
-    activeSessions.set(token, officerProfile);
+      // Check payment expiry (₹199 per month)
+      if (matched.paymentExpiryDate && new Date(matched.paymentExpiryDate).getTime() < Date.now()) {
+        return res.status(403).json({
+          success: false,
+          isExpired: true,
+          error: `તમારું ₹199 નું માસિક સબ્સ્ક્રિપ્શન સમાપ્ત થઈ ગયું છે (${new Date(matched.paymentExpiryDate).toLocaleDateString('gu-IN')})! ચાલુ રાખવા માટે રીન્યુઅલ કરો.`,
+        });
+      }
 
-    return res.json({
-      success: true,
-      message: 'સફળતાપૂર્વક લૉગિન થયું!',
-      token,
-      user: officerProfile,
+      const token = 'police_officer_' + Buffer.from(`${matched.username}:${Date.now()}:${Math.random()}`).toString('hex');
+      const profile = {
+        username: matched.username,
+        email: matched.email,
+        name: matched.name,
+        role: 'Cyber Crime Investigation Officer',
+        station: matched.policeStation,
+        phone: matched.phone,
+        loginTime: Date.now(),
+        plan: matched.plan,
+        paymentExpiryDate: matched.paymentExpiryDate,
+      };
+      activeSessions.set(token, profile);
+
+      return res.json({
+        success: true,
+        message: 'સફળતાપૂર્વક લૉગિન થયું!',
+        token,
+        user: profile,
+      });
+    }
+
+    return res.status(401).json({
+      success: false,
+      error: 'ખોટો યુઝરનેમ અથવા પાસવર્ડ! કૃપા કરીને સાચી વિગત દાખલ કરો અથવા નવું એકાઉન્ટ બનાવો.',
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: 'લૉગિનમાં ક્ષતિ આવી.' });
+  }
+});
+
+// Route: Sync Created User & Payment to server memory
+app.post('/api/users/sync', (req: Request, res: Response) => {
+  try {
+    const { user, payment } = req.body || {};
+    if (user && user.username) {
+      serverUsers.set(user.username.toLowerCase(), user);
+    }
+    if (payment) {
+      serverPayments.unshift(payment);
+    }
+    return res.json({ success: true, count: serverUsers.size });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 

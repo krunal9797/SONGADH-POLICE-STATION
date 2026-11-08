@@ -8,7 +8,12 @@ import {
   AlertCircle,
   Loader2,
   ArrowRight,
+  UserPlus,
+  CreditCard,
+  Sparkles,
 } from 'lucide-react';
+import { CreateUserModal } from './CreateUserModal';
+import { authenticateAppUser } from '../services/userService';
 
 export interface UserSession {
   email: string;
@@ -17,6 +22,9 @@ export interface UserSession {
   station: string;
   phone: string;
   loginTime: number;
+  username?: string;
+  plan?: string;
+  paymentExpiryDate?: string;
 }
 
 interface LoginPageProps {
@@ -30,10 +38,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setSuccessNotice(null);
 
     const trimmedUser = username.trim();
     const trimmedPass = password.trim();
@@ -46,7 +57,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setIsLoading(true);
 
     try {
-      // 1. Try server endpoint authentication
+      // 1. Try server endpoint authentication first
       try {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
@@ -62,28 +73,33 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           sessionStorage.setItem('gujarat_police_user', JSON.stringify(data.user));
           onLoginSuccess(data.user, data.token);
           return;
+        } else if (!res.ok && data?.error && !data.error.includes('ખોટો યુઝરનેમ')) {
+          throw new Error(data.error);
         }
-      } catch (_) {
-        // Fallback to local authentication for static Vercel deployments
+      } catch (srvErr: any) {
+        if (srvErr.message && !srvErr.message.includes('fetch') && !srvErr.message.includes('ખોટો')) {
+          throw srvErr;
+        }
       }
 
-      // 2. Client-side authentication (krunal9797 / 7997)
-      const isValidUser =
-        trimmedUser.toLowerCase() === 'krunal9797' ||
-        trimmedUser.toLowerCase() === 'gamitkrunal7997@gmail.com';
-      const isValidPass = trimmedPass === '7997';
+      // 2. Client-side authentication via userService (supports krunal9797 and all created users with ₹199 plan check)
+      const authResult = authenticateAppUser(trimmedUser, trimmedPass);
 
-      if (!isValidUser || !isValidPass) {
-        throw new Error('ખોટો યુઝરનેમ અથવા પાસવર્ડ! કૃપા કરીને સાચી વિગત દાખલ કરો.');
+      if (!authResult.success) {
+        throw new Error(authResult.error || 'ખોટો યુઝરનેમ અથવા પાસવર્ડ!');
       }
 
+      const verifiedUser = authResult.user!;
       const officerProfile: UserSession = {
-        email: 'gamitkrunal7997@gmail.com',
-        name: 'Er. Krunal Gamit',
-        role: 'Cyber Crime Investigation Officer',
-        station: 'Songadh Police Station, Dist. Tapi',
-        phone: '+917043311587',
+        username: verifiedUser.username,
+        email: verifiedUser.email,
+        name: verifiedUser.name,
+        role: verifiedUser.role === 'admin' ? 'Cyber Crime Super Admin' : 'Cyber Crime Investigation Officer',
+        station: verifiedUser.policeStation,
+        phone: verifiedUser.phone,
         loginTime: Date.now(),
+        plan: verifiedUser.plan,
+        paymentExpiryDate: verifiedUser.paymentExpiryDate,
       };
 
       const token = 'police_auth_' + Date.now();
@@ -249,12 +265,54 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               </button>
             </form>
 
+            {/* Success Notice if created */}
+            {successNotice && (
+              <div className="bg-emerald-950/70 border border-emerald-500/80 text-emerald-200 rounded-xl p-3 text-xs flex items-center gap-2 animate-fade-in">
+                <Sparkles className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{successNotice}</span>
+              </div>
+            )}
+
+            {/* Create User Front Page CTA - User Requested */}
+            <div className="pt-4 border-t border-slate-800">
+              <div className="bg-gradient-to-br from-blue-950/40 via-indigo-950/30 to-slate-900 border border-indigo-500/30 rounded-2xl p-4 text-center space-y-2.5">
+                <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-amber-300">
+                  <CreditCard className="w-4 h-4 text-amber-400" />
+                  <span>નવા અધિકારી એકાઉન્ટ માટે સબ્સ્ક્રિપ્શન</span>
+                </div>
+                <p className="text-[11px] text-slate-300 leading-relaxed">
+                  જો તમારી પાસે લૉગિન એકાઉન્ટ નથી, તો ₹199/મહિનો પેમેન્ટ કરી તમારું નવું એકાઉન્ટ બનાવો:
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setIsCreateModalOpen(true)}
+                  className="w-full py-2.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>નવું એકાઉન્ટ બનાવો (Create User - ₹199/Month)</span>
+                </button>
+              </div>
+            </div>
+
             {/* Official Security Notice */}
-            <div className="pt-3 border-t border-slate-800 text-[10px] text-slate-500 text-center leading-relaxed">
+            <div className="pt-2 text-[10px] text-slate-500 text-center leading-relaxed">
               🔒 <span className="text-slate-400 font-medium">સુરક્ષા નોટિસ:</span> આ એપ્લિકેશન CYBER EXPERT TAPI (SONGADH POLICE STATION) માટે અધિકૃત છે.
             </div>
           </div>
         </div>
+
+        {/* Create User & Payment Modal */}
+        <CreateUserModal
+          isOpen={isCreateModalOpen}
+          onClose={() => setIsCreateModalOpen(false)}
+          onSuccess={(createdUsername) => {
+            setIsCreateModalOpen(false);
+            setUsername(createdUsername);
+            setSuccessNotice(
+              `નવું એકાઉન્ટ "${createdUsername}" સફળતાપૂર્વક બની ગયું છે (₹199 Paid). હવે તમારો પાસવર્ડ દાખલ કરી લૉગિન કરો.`
+            );
+          }}
+        />
       </main>
 
       {/* Footer */}

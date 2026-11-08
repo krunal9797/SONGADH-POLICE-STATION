@@ -7,6 +7,8 @@ import { RawDataViewer } from './components/RawDataViewer';
 import { KycLetterGenerator } from './components/KycLetterGenerator';
 import { BankVerificationLetterGenerator } from './components/BankVerificationLetterGenerator';
 import { LoginPage, UserSession } from './components/LoginPage';
+import { UserManagementPanel } from './components/UserManagementPanel';
+import { CreateUserModal } from './components/CreateUserModal';
 import { extractTextFromPdfInBrowser } from './utils/clientPdfExtractor';
 import { extractNcrpFromDigitalText } from './utils/ncrpParser';
 import {
@@ -26,6 +28,9 @@ import {
   Building2,
   LogOut,
   UserCheck,
+  Users,
+  CreditCard,
+  UserPlus,
 } from 'lucide-react';
 
 export default function App() {
@@ -45,17 +50,22 @@ export default function App() {
   const [currentDoc, setCurrentDoc] = useState<CyberCrimeDocument | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string>('');
   const [fileName, setFileName] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'html' | 'split' | 'trail' | 'code' | 'kyc' | 'bank'>('html');
+  const [activeTab, setActiveTab] = useState<'html' | 'split' | 'trail' | 'code' | 'kyc' | 'bank' | 'users'>('html');
   const [language, setLanguage] = useState<'gu' | 'en'>('gu');
   const [isProcessing, setIsProcessing] = useState(false);
   const [ocrStep, setOcrStep] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastUploadedFile, setLastUploadedFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isCreateUserModalOpen, setIsCreateUserModalOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const isGu = language === 'gu';
+  const isAdmin =
+    userSession?.username?.toLowerCase() === 'krunal9797' ||
+    userSession?.email?.toLowerCase() === 'gamitkrunal7997@gmail.com' ||
+    userSession?.name?.toLowerCase().includes('krunal');
 
   // Logout handler
   const handleLogout = async () => {
@@ -463,6 +473,30 @@ export default function App() {
                 }}
               />
 
+              {/* Admin User Management Button */}
+              <button
+                onClick={() => setActiveTab('users')}
+                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-bold transition ${
+                  activeTab === 'users'
+                    ? 'bg-amber-500 text-slate-950 shadow-md'
+                    : 'bg-amber-950/40 hover:bg-amber-900/60 text-amber-300 border border-amber-800/60'
+                }`}
+                title="યુઝર અને ₹199 પેમેન્ટ મેનેજમેન્ટ"
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>યુઝર્સ & પેમેન્ટ્સ</span>
+              </button>
+
+              {/* Create User Button - User Requested */}
+              <button
+                onClick={() => setIsCreateUserModalOpen(true)}
+                className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1.5 rounded-lg shadow-sm transition"
+                title="નવો યુઝર બનાવો (Create User - ₹199/m)"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>+ નવો યુઝર (₹199)</span>
+              </button>
+
               {/* Print Document */}
               {currentDoc && (
                 <button
@@ -574,6 +608,19 @@ export default function App() {
               >
                 <Building2 className="w-4 h-4 text-emerald-400" />
                 <span>{isGu ? '૬. બેંક વેરિફિકેશન લેટર' : '6. Bank Verification'}</span>
+              </button>
+
+              {/* Tab 7: User & Payment Management - Requested by user */}
+              <button
+                onClick={() => setActiveTab('users')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition whitespace-nowrap ${
+                  activeTab === 'users'
+                    ? 'bg-amber-600 text-white font-bold shadow-xs'
+                    : 'text-amber-400 hover:text-amber-300 hover:bg-slate-800/60 font-semibold'
+                }`}
+              >
+                <Users className="w-4 h-4 text-amber-400" />
+                <span>{isGu ? '૭. યુઝર & પેમેન્ટ મેનેજમેન્ટ (₹199)' : '7. Users & Payments (₹199)'}</span>
               </button>
             </div>
           </div>
@@ -699,7 +746,7 @@ export default function App() {
         )}
 
         {/* Empty State / Upload Dropzone when no doc loaded */}
-        {!currentDoc && !isProcessing && (
+        {!currentDoc && !isProcessing && activeTab !== 'users' && (
           <div
             onDragOver={(e) => {
               e.preventDefault();
@@ -818,9 +865,33 @@ export default function App() {
                 onBack={() => setActiveTab('html')}
               />
             )}
+
+            {/* View 7: User & Payment Management Panel */}
+            {activeTab === 'users' && (
+              <UserManagementPanel
+                onOpenCreateUser={() => setIsCreateUserModalOpen(true)}
+              />
+            )}
           </div>
         )}
+
+        {/* View 7: User & Payment Management Panel (when no PDF is loaded) */}
+        {!currentDoc && activeTab === 'users' && (
+          <UserManagementPanel
+            onOpenCreateUser={() => setIsCreateUserModalOpen(true)}
+          />
+        )}
       </main>
+
+      {/* Global Create User & Payment Modal */}
+      <CreateUserModal
+        isOpen={isCreateUserModalOpen}
+        onClose={() => setIsCreateUserModalOpen(false)}
+        onSuccess={() => {
+          setIsCreateUserModalOpen(false);
+          setActiveTab('users');
+        }}
+      />
 
       {/* Footer */}
       <footer className="bg-slate-900 text-slate-400 text-xs py-5 border-t border-slate-800 mt-auto no-print">

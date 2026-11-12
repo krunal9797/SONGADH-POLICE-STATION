@@ -57,7 +57,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setIsLoading(true);
 
     try {
-      // 1. Try server endpoint authentication first
+      // 1. Try server endpoint authentication first (safely checking content)
       try {
         const res = await fetch('/api/auth/login', {
           method: 'POST',
@@ -67,19 +67,29 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             password: trimmedPass,
           }),
         });
-        const data = await res.json();
-        if (res.ok && data.success && data.token) {
+
+        const rawText = await res.text();
+        let data: any = null;
+        if (rawText && rawText.trim().startsWith('{')) {
+          try {
+            data = JSON.parse(rawText);
+          } catch (_) {}
+        }
+
+        if (res.ok && data?.success && data?.token) {
           sessionStorage.setItem('gujarat_police_token', data.token);
           sessionStorage.setItem('gujarat_police_user', JSON.stringify(data.user));
           onLoginSuccess(data.user, data.token);
           return;
-        } else if (!res.ok && data?.error && !data.error.includes('ખોટો યુઝરનેમ')) {
+        } else if (data?.isExpired) {
           throw new Error(data.error);
         }
       } catch (srvErr: any) {
-        if (srvErr.message && !srvErr.message.includes('fetch') && !srvErr.message.includes('ખોટો')) {
+        // If it's a critical expiration error, propagate it
+        if (srvErr.message && (srvErr.message.includes('સમાપ્ત') || srvErr.message.includes('expired'))) {
           throw srvErr;
         }
+        // Otherwise ignore network/json errors and seamlessly use verified client auth below
       }
 
       // 2. Client-side authentication via userService (supports krunal9797 and all created users with ₹199 plan check)
